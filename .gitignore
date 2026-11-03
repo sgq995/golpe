@@ -1,6 +1,5 @@
 # Binaries
 /golpe
-/cli
 *.test
 *.out
 

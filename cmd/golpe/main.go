@@ -1,6 +1,13 @@
-// Command golpe is the Golpe CLI. It turns .golpe files into plain Go.
+// Command golpe is the Golpe CLI. It turns .golpe files into plain Go that
+// imports only the standard library, so it is the only tool a project needs.
 //
-// Build it with: go build -o golpe ./cmd/cli
+// Install it with
+//
+//	go install github.com/sgq995/golpe/cmd/golpe@latest
+//
+// or add it to a module as a tool and run it with go tool golpe:
+//
+//	go get -tool github.com/sgq995/golpe/cmd/golpe
 //
 // See docs/knowledge/specs/003-cli.md.
 package main
@@ -44,7 +51,7 @@ Commands:
   help      show this help
 
 Planned (see docs/knowledge/specs/003-cli.md):
-  generate  compile .golpe files into _golpe.go files
+  generate  compile .golpe files into _gen.go files
   fmt       format .golpe files
   lsp       run the language server
 `)

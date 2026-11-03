@@ -1,0 +1,11 @@
+# Binaries
+/golpe
+/cli
+*.test
+*.out
+
+# Parallel agent worktrees (see docs/knowledge/process/git-workflow.md)
+/.worktrees/
+
+# Fuzz caches
+testdata/fuzz/**/cache

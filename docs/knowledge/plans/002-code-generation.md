@@ -6,7 +6,7 @@ description: Splice the original source, replacing template headers and markup s
 status: draft
 spec: SPEC-002
 tags: [generator, runtime]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T01:58:38Z }
 ---
 # Approach
 
@@ -55,21 +55,38 @@ func Write(w Writer, v any) error {
 		}
 		return v(w)
 	case string:
-		return WriteString(w, html.EscapeString(v))
-	case fmt.Stringer:
-		return WriteString(w, html.EscapeString(v.String()))
-	case error:
-		return WriteString(w, html.EscapeString(v.Error()))
-	case []byte:
-		return WriteString(w, html.EscapeString(string(v)))
-	default: // numbers, bools, …
-		return WriteString(w, html.EscapeString(fmt.Sprint(v)))
+		return writeText(w, v) // escape.go: WriteString(w, html.EscapeString(v))
 	}
+	if el, ok := asElement(v); ok { // named func(io.Writer) error types, via reflect
+		if el == nil {
+			return nil
+		}
+		return el(w)
+	}
+	return writeText(w, text(v))
 }
 
-// WriteAttr writes a dynamic attribute value, quotes included.
-func WriteAttr(w Writer, v any) error // `"` + EscapeAttr(fmt) + `"`
+// text(v) is fmt.Sprint(v), except that a []byte is text. Fast paths giving
+// fmt's bytes (LAB-008): strconv for predeclared numbers and bools; Error,
+// else String, called directly unless v is a fmt.Formatter or a
+// reflect.Value (left to fmt); a panicking method falls back to fmt.
+func text(v any) string
+
+// WriteAttr writes a dynamic attribute value, quotes included:
+// `"` + escaped text(v) + `"`. nil writes `""`. An Element, nil or not, is
+// an error and nothing is written.
+func WriteAttr(w Writer, v any) error
 ```
+
+Everything that is not nil, an Element, a string or a `[]byte` renders
+exactly as `fmt.Sprint` formats it, then escaped, so fmt's rules hold:
+Formatter before error before Stringer, `<nil>` for nil pointers, panicking
+methods reported rather than propagated (`TestWriteMatchesFmt` pins this).
+The first draft of this snippet switched on `fmt.Stringer` before `error` and
+called `String()` itself, which panics on a nil pointer receiver, and its
+`case Element` misses named func types such as
+`type Icon func(io.Writer) error`, which would have printed as a code
+address.
 
 ## Lowering markup
 
@@ -152,8 +169,9 @@ package's other files).
 # Testing
 
 - **Runtime**: table tests for `Write`/`WriteAttr` over every type case,
-  escaping of `& < > " '`; a failing-writer test; `BenchmarkWrite` for the
-  DEC-004 overhead.
+  escaping of `& < > " '`; byte-for-byte agreement with `fmt.Sprint` for
+  every other value; a failing-writer test at every write position;
+  `BenchmarkWrite` and `BenchmarkPage` for the DEC-004 overhead (LAB-008).
 - **Generator unit tests**: small inputs → expected Go snippets.
 - **Golden tests**: `internal/generator/testdata/<case>/x.golpe` →
   `x_golpe.go.golden`; `-update` flag to rewrite.
@@ -167,9 +185,42 @@ package's other files).
 
 - LAB-006 and LAB-007 (done, see PLAN-001): line directives work and survive
   gofmt with the C-1 rule.
-- LAB-008 (todo, in TASK-002-01): measure `Write(w, any)` against a direct
-  `io.WriteString` + `html.EscapeString`; if overhead > 20% on a 1k-node
-  page, raise the priority of type-directed lowering.
+- LAB-008 (done, TASK-002-01): is runtime dispatch more than 20% slower than
+  type-directed lowering on a 1k-node page? `BenchmarkWrite` and
+  `BenchmarkPage` (root `write_test.go`) render each value through `Write`
+  or `WriteAttr` ("dispatch") and through what type-directed lowering would
+  emit ("direct": `WriteString` of `html.EscapeString` or strconv output, a
+  direct Element call), into a `bytes.Buffer`. Go 1.24, linux/amd64,
+  2.1 GHz Xeon, `-cpu 1`, medians of 10 runs (20 for the page):
+
+  | Value               | dispatch |   direct | overhead | extra allocs     |
+  |---------------------|---------:|---------:|---------:|------------------|
+  | string              |  68.8 ns |  36.7 ns |   +32 ns | 1 (16 B)         |
+  | attribute string    |  83.7 ns |  53.4 ns |   +30 ns | 1 (16 B)         |
+  | int (31337)         |  72.5 ns |  33.5 ns |   +39 ns | 1 (8 B)          |
+  | float64             | 162.4 ns | 125.7 ns |   +37 ns | 1 (8 B)          |
+  | bool                |  27.3 ns |   8.4 ns |   +19 ns | 0                |
+  | fmt.Stringer        |  67.0 ns |  19.1 ns |   +48 ns | 1 (16 B)         |
+  | Element             |  12.0 ns |  10.7 ns |  +1.3 ns | 0                |
+  | **1,005-node page** |  50.9 µs |  32.2 µs | **+58%** | 412 (762 vs 350) |
+
+  The page is an 82-row product table (per row an int, two strings, one of
+  them an attribute, a float64, a Stringer and the row Element; 10.6 kB of
+  HTML): interpolation-heavy. With fmt formatting every non-string value, as
+  the first draft of the snippet did, it took 72.3 µs (+122%; int 122 ns,
+  bool 87 ns, Stringer 182 ns); strconv for numbers and bools brought it to
+  62.9 µs (+94%), and calling Error/String directly to the figure above.
+  What remains is the interface conversion itself. `v` must escape (fmt and
+  user methods may keep it), so every non-constant string, float or
+  int ≥ 256 is boxed on the heap at the call site: 20–25 ns and one 8–16 B
+  allocation each, and the 412 extra allocations are exactly those boxes.
+  The type switch costs 3–4 ns; Elements, bools and small ints are never
+  boxed. No runtime change can remove the boxing.
+  **Conclusion: above the 20% threshold**, so type-directed lowering
+  ([DEC-004](/decisions/004-runtime-dispatch-for-interpolation.md) option 1,
+  out of scope in SPEC-002) should move up in priority; the maintainer
+  decides. Pages with a smaller share of interpolations pay proportionally
+  less, and `Write` stays the fallback for values typed only at run time.
 
 # Risks
 

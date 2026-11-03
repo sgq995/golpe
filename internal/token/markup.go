@@ -1,7 +1,7 @@
 package token
 
 // IsVoid reports whether tag names an HTML void element, which has no close
-// tag (SPEC-001 R10): area, base, br, col, embed, hr, img, input, link,
+// tag (SPEC-001 R13): area, base, br, col, embed, hr, img, input, link,
 // meta, source, track or wbr. As in HTML, ASCII case is ignored.
 func IsVoid(tag string) bool {
 	switch lowerASCII(tag) {
@@ -13,7 +13,7 @@ func IsVoid(tag string) bool {
 
 // IsRawText reports whether tag names an element whose content is taken
 // literally up to its close tag, with no interpolation and no embedded
-// statements (SPEC-001 R16): script or style. As in HTML, ASCII case is
+// statements (SPEC-001 R19): script or style. As in HTML, ASCII case is
 // ignored.
 func IsRawText(tag string) bool {
 	switch lowerASCII(tag) {
@@ -24,7 +24,7 @@ func IsRawText(tag string) bool {
 }
 
 // IsEmbeddedKeyword reports whether word is one of the Go keywords that
-// start an embedded statement inside markup (SPEC-001 R15): if, for, switch
+// start an embedded statement inside markup (SPEC-001 R18): if, for, switch
 // or select. Like Go keywords it is case-sensitive, so "If" is not one.
 func IsEmbeddedKeyword(word string) bool {
 	switch word {

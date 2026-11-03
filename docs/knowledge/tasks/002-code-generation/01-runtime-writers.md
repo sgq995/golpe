@@ -63,3 +63,11 @@ Tests pass; benchmark numbers recorded.
   with the maintainer; the helpers live in the root package for now.
 - Extra file outside `touches`: `example_test.go`, with runnable `Example` (a hand-lowered
   template), `ExampleWrite` and `ExampleWriteAttr`.
+
+# Superseded (2026-11-03)
+In the design interview the maintainer chose standard-library-only generated
+code ([DEC-005](/decisions/005-standard-library-only-output.md)), so
+generated code never calls these writers. `Writer`, `WriteString`, `Write`,
+`WriteAttr` and the escaping code were removed from the root package; the
+LAB-008 numbers stay in [PLAN-002](/plans/002-code-generation.md). Open
+question 1 is settled: there is no runtime package at all.

@@ -22,6 +22,7 @@ how, and what is left to do. Agents read this file first and descend
 * [Plans](plans/) - how we build it: architecture, snippets, tests, labs
 * [Tasks](tasks/) - plan slices as todo lists, one file per slice
 * [Decisions](decisions/) - architecture decision records
+* [Backlog](backlog.md) - deferred and rejected ideas, each with its reason
 
 # History
 * [Log](log.md) - newest-first change history of this bundle

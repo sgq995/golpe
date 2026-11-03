@@ -18,7 +18,7 @@ func spellings(name string) []string {
 }
 
 func TestIsVoid(t *testing.T) {
-	// SPEC-001 R10: exactly these 13, matched ASCII case-insensitively.
+	// SPEC-001 R13: exactly these 13, matched ASCII case-insensitively.
 	void := []string{"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
 	for _, tag := range void {
 		for _, s := range spellings(tag) {
@@ -46,7 +46,7 @@ func TestIsVoid(t *testing.T) {
 }
 
 func TestIsRawText(t *testing.T) {
-	// SPEC-001 R16: script and style, matched ASCII case-insensitively.
+	// SPEC-001 R19: script and style, matched ASCII case-insensitively.
 	for _, tag := range []string{"script", "style"} {
 		for _, s := range spellings(tag) {
 			if !IsRawText(s) {
@@ -67,7 +67,7 @@ func TestIsRawText(t *testing.T) {
 }
 
 func TestIsEmbeddedKeyword(t *testing.T) {
-	// SPEC-001 R15: the Go keywords that start an embedded statement.
+	// SPEC-001 R18: the Go keywords that start an embedded statement.
 	for _, kw := range []string{"if", "for", "switch", "select"} {
 		if !IsEmbeddedKeyword(kw) {
 			t.Errorf("IsEmbeddedKeyword(%+q) = false, want true", kw)

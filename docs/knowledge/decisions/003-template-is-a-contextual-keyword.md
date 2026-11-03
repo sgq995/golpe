@@ -3,10 +3,11 @@ type: Decision
 id: DEC-003
 title: template is a contextual keyword
 description: 'template' is a keyword only at the start of a top-level declaration followed by a name or receiver, so existing Go code (including html/template's package name) keeps working.
-status: draft
-decision: proposed
+status: stable
+decision: accepted
 tags: [language, parser]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+verified: { by: human:sgq995, at: 2026-11-03T03:12:42Z }
 ---
 # Context
 
@@ -32,6 +33,9 @@ valid Go file keeps its meaning. `component` is not reserved; an alias can be
 added later if wanted.
 
 # Consequences
+
+The maintainer chose `template` in the design interview of 2026-11-03.
+
 
 - Inside function bodies and expressions `template` is an ordinary
   identifier (`template.HTMLEscapeString(s)` works).

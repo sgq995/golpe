@@ -2,236 +2,159 @@
 type: Plan
 id: PLAN-002
 title: Generating Go from the extended AST
-description: Splice the original source, replacing template headers and markup statements with lowered Go, add line directives, then gofmt; the runtime package provides escaping writers.
+description: Splice the original source, replacing template headers, markup statements, element and writer() with standard-library Go; add line directives and position-wrapped errors; gofmt the result into x_gen.go.
 status: draft
 spec: SPEC-002
-tags: [generator, runtime]
-generated: { by: claude-code/agent, at: 2026-11-03T01:58:38Z }
+tags: [generator]
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
 ---
 # Approach
 
-Implements [SPEC-002](/specs/002-code-generation.md). The generator is a
-**splicer**, not a printer: user Go code is copied byte-for-byte from the
-`.golpe` source (keeping its comments and layout) and only three kinds of
-span are replaced:
+Implements [SPEC-002](/specs/002-code-generation.md) under
+[DEC-005](/decisions/005-standard-library-only-output.md): the output imports
+only `fmt`, `html` and `io`. The generator is a **splicer**, not a printer:
+user Go code is copied byte-for-byte from the `.golpe` source (keeping its
+comments and layout) and only these spans are replaced:
 
 1. a template header `template Name[TP](params) {` →
-   `func Name[TP](params) __golpe.Element { return func(__golpeW __golpe.Writer) error {`
+   `func Name[TP](params) func(io.Writer) error { return func(__golpeW io.Writer) error {`,
    and its closing `}` → `return nil } }`;
 2. each `MarkupStmt` span → lowered write statements;
-3. each `element` identifier in a type position → `__golpe.Element`.
+3. `element` identifiers in type positions → `func(io.Writer) error`;
+4. `writer()` calls → `__golpeW`.
 
-Every copied span is preceded by a line directive (LAB-006/007 in
-[PLAN-001](/plans/001-template-language.md)), then the whole file goes
-through `go/format.Source`.
+Every copied span is preceded by a line directive (LAB-006/007), then the
+file goes through `go/format.Source`.
 
 # Architecture
 
-| Package / file                   | Owns                                                         |
-|----------------------------------|--------------------------------------------------------------|
-| root `golpe` (`write.go`, `escape.go`) | [Runtime](/actuators/runtime.md): `Writer`, `WriteString`, `Write`, `WriteAttr`, escapers |
-| `internal/generator`             | [Generator](/actuators/generator.md): `Generate(fset, file, src) ([]byte, error)` |
-| `internal/generator/emit.go`     | Buffered emitter: static-byte coalescing, directives          |
+| File in `internal/generator` | Owns |
+|------------------------------|------|
+| `generate.go` | `Generate(fset, file, src, resolve) ([]byte, error)`; splicing |
+| `emit.go` | buffered emitter: static coalescing, checked writes, error wrapping |
+| `names.go` | scope tracking; finding unshadowed `element` and `writer()` |
+| `imports.go` | adding `fmt`/`html`/`io` hygienically |
+| `directive.go` | line directives (C-1 rule) |
+| `filename.go` | `GeneratedName("x_test.golpe") == "x_gen_test.go"` |
+
+`resolve` is the component resolver of [PLAN-005](/plans/005-component-tags.md),
+injected so the generator stays a pure function of its inputs.
 
 # Snippets
 
-## Runtime (root package)
-
-```go
-package golpe
-
-type Writer = io.Writer // lets generated code avoid importing "io"
-
-func WriteString(w Writer, s string) error { _, err := io.WriteString(w, s); return err }
-
-// Write renders a content interpolation (DEC-004).
-func Write(w Writer, v any) error {
-	switch v := v.(type) {
-	case nil:
-		return nil
-	case Element: // == func(io.Writer) error
-		if v == nil {
-			return nil
-		}
-		return v(w)
-	case string:
-		return writeText(w, v) // escape.go: WriteString(w, html.EscapeString(v))
-	}
-	if el, ok := asElement(v); ok { // named func(io.Writer) error types, via reflect
-		if el == nil {
-			return nil
-		}
-		return el(w)
-	}
-	return writeText(w, text(v))
-}
-
-// text(v) is fmt.Sprint(v), except that a []byte is text. Fast paths giving
-// fmt's bytes (LAB-008): strconv for predeclared numbers and bools; Error,
-// else String, called directly unless v is a fmt.Formatter or a
-// reflect.Value (left to fmt); a panicking method falls back to fmt.
-func text(v any) string
-
-// WriteAttr writes a dynamic attribute value, quotes included:
-// `"` + escaped text(v) + `"`. nil writes `""`. An Element, nil or not, is
-// an error and nothing is written.
-func WriteAttr(w Writer, v any) error
-```
-
-Everything that is not nil, an Element, a string or a `[]byte` renders
-exactly as `fmt.Sprint` formats it, then escaped, so fmt's rules hold:
-Formatter before error before Stringer, `<nil>` for nil pointers, panicking
-methods reported rather than propagated (`TestWriteMatchesFmt` pins this).
-The first draft of this snippet switched on `fmt.Stringer` before `error` and
-called `String()` itself, which panics on a nil pointer receiver, and its
-`case Element` misses named func types such as
-`type Icon func(io.Writer) error`, which would have printed as a code
-address.
-
-## Lowering markup
+## Emitter
 
 ```go
 type emitter struct {
-	buf    bytes.Buffer
-	static strings.Builder // pending static HTML, flushed as one WriteString
+	buf      bytes.Buffer
+	static   strings.Builder // pending static HTML
+	staticAt token.Position  // where the pending static bytes start
+	tmpl     string          // template name, for error wrapping
 }
-
-func (e *emitter) static(s string) { e.static.WriteString(s) }
 
 func (e *emitter) flush() {
 	if e.static.Len() == 0 {
 		return
 	}
-	fmt.Fprintf(&e.buf, "if err := __golpe.WriteString(__golpeW, %s); err != nil { return err }\n",
-		strconv.Quote(e.static.String()))
+	e.checkedWrite(strconv.Quote(e.static.String()), e.staticAt)
 	e.static.Reset()
 }
 
-func (g *gen) node(n ast.Node) {
-	switch n := n.(type) {
-	case *ast.Element:
-		g.e.static("<" + n.Name)
-		for _, a := range n.Attrs { g.attr(a) }
-		g.e.static(">")
-		for _, c := range n.Children { g.node(c) }
-		if !n.SelfClosing && !token.IsVoid(n.Name) {
-			g.e.static("</" + n.Name + ">")
-		}
-	case *ast.Text:
-		g.e.static(html.EscapeString(n.Value)) // escaped at generation time (R7)
-	case *ast.Interp:
-		g.e.flush()
-		g.call("Write", n.X) // __golpe.Write(__golpeW, /*line …*/ <src of X>)
-	case *ast.If:
-		g.e.flush()
-		g.header(n.Stmt)     // "if " + /*line*/ src[Init..Cond] + " {"
-		g.nodes(n.Body)
-		g.e.flush()
-		g.elseBranch(n.Else) // "} else {" / "} else if …"
-	// For, Switch, Select, Case: same shape.
-	}
+// checkedWrite emits: if _, err := io.WriteString(__golpeW, <expr>); err != nil { return <wrap> }
+func (e *emitter) checkedWrite(expr string, at token.Position) {
+	fmt.Fprintf(&e.buf, "if _, err := %s.WriteString(__golpeW, %s); err != nil {\nreturn %s\n}\n",
+		e.pkg("io"), expr, e.wrap(at))
 }
+
+// wrap returns fmt.Errorf("nav.golpe:8:6: NavItem: %w", err) (SPEC-002 R13).
+func (e *emitter) wrap(at token.Position) string
 ```
 
-`<!-- comments -->` and the doctype are static bytes. Whitespace (SPEC-001
-R18) is already normalised by the parser in `Text.Value`.
-
-## Line directives
+## Values, render calls, attributes
 
 ```go
-// directive returns the text to put immediately before user code that
-// starts at p. See LAB-007 for why it targets column C-1.
-func directive(p token.Position) string {
-	if p.Column == 1 {
-		return fmt.Sprintf("\n//line %s:%d:1\n", p.Filename, p.Line)
+func (g *gen) interp(n *ast.Interp) {
+	g.e.flush()
+	src := g.directive(n.X) + g.source(n.X) // verbatim user expression
+	if g.names.containsWriter(n.X) {       // DEC-006: writer() anywhere
+		fmt.Fprintf(&g.e.buf, "if err := %s; err != nil {\nreturn %s\n}\n", src, g.e.wrap(g.pos(n)))
+		return
 	}
-	return fmt.Sprintf("/*line %s:%d:%d*/ ", p.Filename, p.Line, p.Column-1)
+	fmt.Fprintf(&g.e.buf, "if __golpeV := any(%s); __golpeV != nil {\n", src)
+	g.e.checkedWrite(g.e.pkg("html")+".EscapeString("+g.e.pkg("fmt")+".Sprint(__golpeV))", g.pos(n))
+	g.e.buf.WriteString("}\n")
+}
+
+// <tag name={expr}>: plain if statements (SPEC-002 R11).
+func (g *gen) dynamicAttr(a *ast.Attr, x *ast.Interp) {
+	g.e.flush()
+	escaped := g.e.pkg("html") + ".EscapeString(" + g.e.pkg("fmt") + ".Sprint(__golpeV))"
+	fmt.Fprintf(&g.e.buf, "if __golpeV := any(%s); __golpeV == true {\n", g.directive(x.X)+g.source(x.X))
+	g.e.checkedWrite(strconv.Quote(" "+a.Name), g.pos(a))
+	g.e.buf.WriteString("} else if __golpeV != false && __golpeV != nil {\n")
+	g.e.checkedWrite(strconv.Quote(" "+a.Name+`="`)+"+"+escaped+`+"\""`, g.pos(a))
+	g.e.buf.WriteString("}\n")
 }
 ```
 
-Filenames in directives are the path relative to the generated file's
-directory (i.e. the bare file name), so output is identical on every machine
-(R11).
+Static parts (`<li>`, ` class="btn"`, text after R22) only go to
+`e.static`, so `<li><span>` becomes one write, also across consecutive
+markup statements. Embedded statements print their header verbatim, then the
+lowered body: `if <init; cond> {` … `} else {` … `}`.
 
-## element rewriting
+## Names and scopes
 
-Collect package-level declarations named `element` across the file; if none,
-rewrite every `*ast.Ident` named `element` that appears inside a type
-expression (`Field.Type`, `ValueSpec.Type`, `TypeSpec.Type`, composite
-literal `Type`, conversion `Fun` resolved syntactically as a type,
-`FuncType` params/results, `MapType`, `ArrayType`, `ChanType`,
-`StarExpr`, type arguments). Local shadowing in function scopes is handled
-with a simple scope stack. Limitation (documented): an `element` declared in
-*another* file of the same package is not seen; v1 reports a clear error
-if a package declares `element` in a `.go` file (`golpe generate` checks the
-package's other files).
+`names` walks the file with a scope stack (package declarations, params,
+`:=`/`var` in blocks, range keys, func literal params). `element` and
+`writer` are rewritten only when they resolve to the universe scope, like
+Go's predeclared names. `writer()` outside a template body, or inside an
+attribute value, is an error.
+
+## Imports
+
+If the file already imports `"io"` (or `fmt`, `html`) under some name, use
+that name; otherwise add the import under its default name, or as
+`__golpe_io` when `io` is already taken by another package. `html` is added
+only when a value is written; `fmt` and `io` whenever a template exists.
 
 # Testing
 
-- **Runtime**: table tests for `Write`/`WriteAttr` over every type case,
-  escaping of `& < > " '`; byte-for-byte agreement with `fmt.Sprint` for
-  every other value; a failing-writer test at every write position;
-  `BenchmarkWrite` and `BenchmarkPage` for the DEC-004 overhead (LAB-008).
-- **Generator unit tests**: small inputs → expected Go snippets.
-- **Golden tests**: `internal/generator/testdata/<case>/x.golpe` →
-  `x_golpe.go.golden`; `-update` flag to rewrite.
-- **End-to-end**: for each golden case a `render_test.go` in a temporary
-  module (`go.mod` with a `replace` to the repo) builds the generated code with
-  `go run` and compares rendered HTML with `*.html.golden`. Also asserts
-  that `go vet` errors for a deliberately broken case point at `x.golpe:L:C`.
-- **Determinism**: generate twice, compare bytes; `gofmt -l` on output.
+- **Unit tests:** header/footer splice; coalescing; value vs render-call
+  detection (`{p.C(writer())}`, `{f(g(writer()))}`, `{json.NewEncoder(writer()).Encode(v)}`,
+  shadowed `writer`); attributes true/false/nil/other; nil interface skip;
+  embedded statements; `element` rewriting incl. shadowing; imports with
+  name collisions; `GeneratedName` suffix cases.
+- **Golden tests:** `internal/generator/testdata/<case>/x.golpe` →
+  `x_gen.go.golden` with `-update`.
+- **End-to-end:** each golden case is compiled in a temporary module (no
+  dependency needed: std only) and rendered; HTML compared with
+  `x.html.golden`. A broken case asserts that `go vet` reports `x.golpe:L:C`.
+- **Determinism:** generate twice, compare bytes; `gofmt -l` on output.
 
 # Laboratories
 
-- LAB-006 and LAB-007 (done, see PLAN-001): line directives work and survive
-  gofmt with the C-1 rule.
-- LAB-008 (done, TASK-002-01): is runtime dispatch more than 20% slower than
-  type-directed lowering on a 1k-node page? `BenchmarkWrite` and
-  `BenchmarkPage` (root `write_test.go`) render each value through `Write`
-  or `WriteAttr` ("dispatch") and through what type-directed lowering would
-  emit ("direct": `WriteString` of `html.EscapeString` or strconv output, a
-  direct Element call), into a `bytes.Buffer`. Go 1.24, linux/amd64,
-  2.1 GHz Xeon, `-cpu 1`, medians of 10 runs (20 for the page):
-
-  | Value               | dispatch |   direct | overhead | extra allocs     |
-  |---------------------|---------:|---------:|---------:|------------------|
-  | string              |  68.8 ns |  36.7 ns |   +32 ns | 1 (16 B)         |
-  | attribute string    |  83.7 ns |  53.4 ns |   +30 ns | 1 (16 B)         |
-  | int (31337)         |  72.5 ns |  33.5 ns |   +39 ns | 1 (8 B)          |
-  | float64             | 162.4 ns | 125.7 ns |   +37 ns | 1 (8 B)          |
-  | bool                |  27.3 ns |   8.4 ns |   +19 ns | 0                |
-  | fmt.Stringer        |  67.0 ns |  19.1 ns |   +48 ns | 1 (16 B)         |
-  | Element             |  12.0 ns |  10.7 ns |  +1.3 ns | 0                |
-  | **1,005-node page** |  50.9 µs |  32.2 µs | **+58%** | 412 (762 vs 350) |
-
-  The page is an 82-row product table (per row an int, two strings, one of
-  them an attribute, a float64, a Stringer and the row Element; 10.6 kB of
-  HTML): interpolation-heavy. With fmt formatting every non-string value, as
-  the first draft of the snippet did, it took 72.3 µs (+122%; int 122 ns,
-  bool 87 ns, Stringer 182 ns); strconv for numbers and bools brought it to
-  62.9 µs (+94%), and calling Error/String directly to the figure above.
-  What remains is the interface conversion itself. `v` must escape (fmt and
-  user methods may keep it), so every non-constant string, float or
-  int ≥ 256 is boxed on the heap at the call site: 20–25 ns and one 8–16 B
-  allocation each, and the 412 extra allocations are exactly those boxes.
-  The type switch costs 3–4 ns; Elements, bools and small ints are never
-  boxed. No runtime change can remove the boxing.
-  **Conclusion: above the 20% threshold**, so type-directed lowering
-  ([DEC-004](/decisions/004-runtime-dispatch-for-interpolation.md) option 1,
-  out of scope in SPEC-002) should move up in priority; the maintainer
-  decides. Pages with a smaller share of interpolations pay proportionally
-  less, and `Write` stays the fallback for values typed only at run time.
+- LAB-006, LAB-007 (done, PLAN-001): line directives work and survive gofmt
+  with the C-1 rule.
+- LAB-008 (done, history): measured the runtime-dispatch design of
+  [DEC-004](/decisions/004-runtime-dispatch-for-interpolation.md) against
+  type-aware writes on an interpolation-heavy 1,005-node page: 50.9 µs vs
+  32.2 µs (+58%), 762 vs 350 allocations; formatting everything with fmt was
+  about +122%. Most of the cost is boxing values into `any`. DEC-005 accepts
+  standard-library cost (`fmt.Sprint` per value) for simplicity; type-aware
+  lowering is in the [backlog](/backlog.md).
 
 # Risks
 
-- **Splicing vs gofmt.** If a directive lands inside a token sequence gofmt
-  rewrites (e.g. composite literals split over lines), positions may drift by
-  a column. Mitigation: end-to-end position assertions in golden tests.
-- **Attribute escaping** needs care for unquoted contexts; we always quote.
+- **Verbose output.** Every write is checked and wrapped; acceptable for
+  generated code, and gofmt keeps it readable.
+- **Splicing vs gofmt.** A directive inside a construct gofmt rewrites could
+  drift a column; end-to-end position assertions catch it.
+- **Func values printed by mistake** (`{p.Children}`); documented, and a
+  future vet-like check could flag fields of type `element` used as values.
 
 # Slices
 
-1. [TASK-002-01 Runtime writers and escaping](/tasks/002-code-generation/01-runtime-writers.md)
+1. [TASK-002-01 Runtime writers and escaping](/tasks/002-code-generation/01-runtime-writers.md) ✅ (superseded by DEC-005; code removed)
 2. [TASK-002-02 Lowering templates and markup](/tasks/002-code-generation/02-lowering.md)
-3. [TASK-002-03 Line directives and hygiene](/tasks/002-code-generation/03-line-directives.md)
+3. [TASK-002-03 Line directives and wrapped errors](/tasks/002-code-generation/03-line-directives.md)
 4. [TASK-002-04 End-to-end golden tests](/tasks/002-code-generation/04-end-to-end.md)

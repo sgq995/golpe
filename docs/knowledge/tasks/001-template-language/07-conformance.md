@@ -8,7 +8,7 @@ plan: PLAN-001
 state: todo
 depends_on: [TASK-001-06]
 touches: [internal/parser/conformance_test.go, internal/parser/fuzz_test.go]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
 ---
 # Goal
 Close the acceptance criteria of [SPEC-001](/specs/001-template-language.md).

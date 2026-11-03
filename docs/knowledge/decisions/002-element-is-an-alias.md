@@ -2,11 +2,12 @@
 type: Decision
 id: DEC-002
 title: golpe.Element is a type alias for func(io.Writer) error
-description: Define Element as an alias rather than a defined type so generated templates and hand-written writer funcs interoperate without conversions.
-status: draft
-decision: proposed
+description: element in .golpe files means func(io.Writer) error; the optional root package offers golpe.Element as an alias of that same type, so writer funcs interoperate without conversions.
+status: stable
+decision: accepted
 tags: [runtime, api]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+verified: { by: human:sgq995, at: 2026-11-03T03:12:42Z }
 ---
 # Context
 
@@ -30,5 +31,9 @@ functions instead (`golpe.Render`, `golpe.String` later).
 # Consequences
 
 - No methods on Element, ever, without a breaking change.
-- `element` in a `.golpe` file is rewritten to `golpe.Element` (an alias,
-  so it is the same type as `func(io.Writer) error`).
+- Revised on 2026-11-03 by [DEC-005](/decisions/005-standard-library-only-output.md):
+  generated code never imports golpe, so `element` is rewritten to the
+  literal type `func(io.Writer) error`. `golpe.Element` stays as an optional
+  alias for developers ([SPEC-006](/specs/006-optional-helpers.md)).
+- The maintainer kept `func(io.Writer) error` over a context-taking or
+  interface-based Element ([DEC-008](/decisions/008-no-implicit-context.md)).

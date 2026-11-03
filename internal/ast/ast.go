@@ -264,7 +264,7 @@ func (v *StaticValue) End() token.Pos { return offset(v.ValuePos, len(v.Raw)) }
 type Text struct {
 	ValuePos token.Pos
 	Raw      string // source text
-	Value    string // the text to render, as normalised by the parser (SPEC-001 R18)
+	Value    string // the text to render, as normalised by the parser (SPEC-001 R22)
 }
 
 func (t *Text) Pos() token.Pos { return t.ValuePos }

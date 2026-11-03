@@ -4,7 +4,7 @@ id: PROC-CONVENTIONS
 title: Knowledge base conventions
 description: Concept types, required frontmatter, IDs, file naming and link style for the Golpe OKF bundle.
 tags: [process, okf]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
 ---
 # Format
 
@@ -26,6 +26,7 @@ adds the rules below. `go run ./internal/okflint` checks them, and
 | `Task Slice` | `tasks/<n>/`  | One shippable slice of a plan, as a todo list                | `id`, `spec`, `plan`, `state` |
 | `Decision`   | `decisions/`  | An architecture decision record                              | `id`, `status`, `decision`     |
 | `Playbook`   | `process/`    | How we work                                                  | `id`                           |
+| `Backlog`    | `backlog.md`  | Deferred and rejected ideas, with the decision that parked them | `id`                        |
 
 Every concept also needs `title` and a one-sentence `description` (it is what
 index entries and search show).

@@ -6,182 +6,105 @@ description: Pre-scan with go/scanner, parse markup with a hand-written parser, 
 status: draft
 spec: SPEC-001
 tags: [parser, token, ast]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
 ---
 # Approach
 
 Implements [SPEC-001](/specs/001-template-language.md) following
-[DEC-001](/decisions/001-mask-and-reuse-go-parser.md): we never fork
-`go/parser`. A Golpe file is parsed in five passes, all over the same bytes
+[DEC-001](/decisions/001-mask-and-reuse-go-parser.md) (accepted): we never
+fork `go/parser`. A Golpe file is parsed in five passes over the same bytes
 and the same `token.FileSet`, so every position is a real `.golpe` position.
 
 ```text
  x.golpe bytes
-   │ 1. scan      go/scanner finds top-level "template" and, inside template
-   │              bodies, "<" + letter at statement starts      (internal/parser/scan.go)
+   │ 1. scan      go/scanner finds top-level "template" (token.IsTemplateKeyword)
+   │              and, in template bodies, "<"+letter or "<>" at statement starts
    │ 2. markup    hand-written markup parser from each start → tree + extent
-   │              + list of Go fragments (interp exprs, stmt headers) (markup.go)
+   │              + Go fragments (interp exprs, statement headers)      (markup.go)
    │ 3. mask      same-length copy: template→"func    ", first "<"→";",
    │              tags/text→spaces (newlines kept), {e}→" e;", headers kept (mask.go)
    │ 4. go/parser ParseFile(masked) → *go/ast.File with exact positions
    │ 5. graft     FuncDecl→TemplateDecl, placeholder EmptyStmt + the Go stmts
-   │              inside the region → MarkupStmt; tree nodes get their ast.Expr /
-   │              header stmts from the parsed skeleton                (graft.go)
+   │              inside the region → MarkupStmt; nodes get their go/ast parts (graft.go)
    ▼
- *internal/ast.File  (go/ast.File whose Decls may hold *TemplateDecl)
+ *go/ast.File whose Decls may hold *ast.TemplateDecl
 ```
+
+`element` and `writer()` need nothing special here: they are ordinary
+identifiers to the parser; the generator handles them
+([PLAN-002](/plans/002-code-generation.md)).
 
 # Architecture
 
-| Package          | Owns                                                                   |
-|------------------|------------------------------------------------------------------------|
-| `internal/token` | [Golpe tokens](/entities/golpe-token.md): Go's tokens + Golpe's, `Lookup`, `IsVoid`, `IsRawText` |
-| `internal/ast`   | `TemplateDecl`, `MarkupStmt`, markup node types, `Walk`, `Inspect`     |
-| `internal/parser`| `ParseFile`, scanning, markup parsing, masking, grafting, error list   |
+| Package | Owns | State |
+|---------|------|-------|
+| `internal/token` | [Golpe tokens](/entities/golpe-token.md); `FromGo`, `Go`, `String`, `Lookup`, `IsTemplateKeyword`, `IsVoid`, `IsRawText`, `IsEmbeddedKeyword`; element-name lists (TASK-005-01) | done (TASK-001-02) |
+| `internal/ast` | `TemplateDecl`, `MarkupStmt`, markup nodes, `Walk`, `Inspect`, `Fprint` | done (TASK-001-03) |
+| `internal/parser` | `ParseFile`, scanning, markup parsing, masking, grafting, errors | todo |
 
-Actuator: [Parser](/actuators/parser.md). Entities produced:
-[Template declaration](/entities/template-declaration.md),
-[Markup node](/entities/markup-node.md),
-[Embedded statement](/entities/embedded-statement.md),
-[Interpolation](/entities/interpolation.md),
-[Attribute](/entities/attribute.md).
+Actuator: [Parser](/actuators/parser.md).
 
-# Snippets
+# As built: internal/token
 
-## internal/token: extending go/token
+See the [entity](/entities/golpe-token.md). Notable refinements over the
+first sketch: `Lookup` is exactly `go/token.Lookup` and the contextual check
+is `IsTemplateKeyword(lit string, next Token) bool` (DEC-003); names print as
+go/token does (delimiters by spelling, classes by name, unknown `token(N)`);
+`IsVoid`/`IsRawText` fold ASCII case only (no Unicode folding, so the Kelvin
+sign does not make `linK` void); a test fails if go/token ever grows past
+the Golpe base (1024).
 
-```go
-package token
-
-import gotoken "go/token"
-
-// Token is a go/token.Token or a Golpe token. Values below golpeBase are
-// exactly go/token's, so conversion both ways is a no-op.
-type Token int
-
-const golpeBase Token = 1 << 10 // well above go/token's last value
-
-const (
-	TEMPLATE Token = golpeBase + iota // contextual keyword
-	TAG_OPEN                          // <name
-	TAG_END                           // >
-	TAG_SELF_CLOSE                    // />
-	TAG_CLOSE                         // </name>
-	TEXT
-	INTERP_OPEN  // {
-	INTERP_CLOSE // }
-	HTML_COMMENT // <!-- … -->
-	DOCTYPE      // <!DOCTYPE …>
-)
-
-func FromGo(t gotoken.Token) Token { return Token(t) }
-
-func (t Token) Go() (gotoken.Token, bool) {
-	if t < golpeBase {
-		return gotoken.Token(t), true
-	}
-	return gotoken.ILLEGAL, false
-}
-
-func (t Token) String() string {
-	if g, ok := t.Go(); ok {
-		return g.String()
-	}
-	return golpeNames[t-golpeBase]
-}
-
-func IsVoid(tag string) bool    // br, img, input, …  (SPEC-001 R10)
-func IsRawText(tag string) bool // script, style        (R16)
-```
-
-## internal/ast: new nodes through embedding
+# As built: internal/ast
 
 ```go
-package ast
-
-import goast "go/ast"
-
-// TemplateDecl embeds the FuncDecl go/parser produced from the masked
-// "func    Name(...)": it satisfies goast.Decl via the promoted declNode().
 type TemplateDecl struct {
-	*goast.FuncDecl           // Type.Results is always nil
-	Template token.Pos        // position of the "template" keyword
+	*goast.FuncDecl           // from the masked "func    Name(...)"; Results nil
+	Template token.Pos        // the "template" keyword; Pos() returns it
 }
 
-// MarkupStmt replaces the placeholder EmptyStmt (";") the mask left where
-// the root tag started; it satisfies goast.Stmt via promoted stmtNode().
 type MarkupStmt struct {
-	*goast.EmptyStmt
-	Root Node   // *Element or *Doctype
-	EndPos token.Pos
+	*goast.EmptyStmt          // the ";" placeholder; Pos() is the markup start
+	Root Node                 // *Element, *Fragment (TASK-001-04) or *Doctype; End() is Root.End()
 }
 
-func (s *MarkupStmt) End() token.Pos { return s.EndPos }
-
-// Node is any markup node.
-type Node interface {
-	goast.Node
-	markupNode()
-}
+type Node interface{ goast.Node; markupNode() }   // every markup node
+type AttrValue interface{ Node; attrValueNode() } // *StaticValue | *Interp
 
 type Element struct {
-	Lt          token.Pos // <
-	Name        string
-	NamePos     token.Pos
-	Attrs       []*Attr
-	SelfClosing bool
-	Children    []Node
-	Close       token.Pos // < of </name>, or NoPos for void/self-closing
-	EndPos      token.Pos
+	Lt          token.Pos; Name string; Attrs []*Attr
+	SelfClosing bool; Children []Node; Close token.Pos; EndPos token.Pos
 }
+type Attr        struct{ Name string; NamePos token.Pos; Value AttrValue } // nil = boolean
+type StaticValue struct{ ValuePos token.Pos; Raw, Value string }           // Raw has quotes
+type Text        struct{ ValuePos token.Pos; Raw, Value string }
+type Interp      struct{ Lbrace token.Pos; X goast.Expr; Rbrace token.Pos }
+type Comment     struct{ Start token.Pos; Text string } // <!-- --> incl. delimiters; rename to HTMLComment (TASK-001-04)
+type Doctype     struct{ Start token.Pos; Text string }
 
-type Attr struct {
-	Name    string
-	NamePos token.Pos
-	Value   AttrValue // nil (boolean) | *StaticValue | *Interp
-}
-
-type Text struct{ ValuePos token.Pos; Raw, Value string } // Value after R18
-type Interp struct{ Lbrace token.Pos; X goast.Expr; Rbrace token.Pos }
-type Comment struct{ Start token.Pos; Text string }       // <!-- -->
-type Doctype struct{ Start token.Pos; Text string }
-
-// Embedded statements reuse the go/ast statement go/parser built from the
-// skeleton, for its header; bodies are markup.
-type If struct {
-	Stmt *goast.IfStmt // Init, Cond (Body/Else ignored)
-	Body []Node
-	Else Node          // nil | *If | *Block
-}
-type For struct {
-	Stmt goast.Stmt // *goast.ForStmt or *goast.RangeStmt (header only)
-	Body []Node
-}
-type Switch struct {
-	Stmt  goast.Stmt // *goast.SwitchStmt or *goast.TypeSwitchStmt
-	Cases []*Case
-}
-type Select struct {
-	Stmt  *goast.SelectStmt
-	Cases []*Case
-}
-type Case struct {
-	Clause goast.Stmt // *goast.CaseClause or *goast.CommClause (header only)
-	Body   []Node
-}
-type Block struct{ Lbrace token.Pos; Body []Node; Rbrace token.Pos }
-
-// Walk/Inspect understand goast nodes AND these; goast.Walk panics on
-// them (LAB-003). Implemented as a type switch on our nodes that falls back
-// to goast.Inspect for subtrees that are pure go/ast.
-func Inspect(n goast.Node, f func(goast.Node) bool)
+// Embedded statements hold the go/ast statement go/parser built from the
+// skeleton, but only its HEADER is meaningful; positions live on our nodes.
+type If     struct{ Keyword token.Pos; Stmt *goast.IfStmt; Body *Block; Else Node } // nil | *If | *Block
+type For    struct{ Keyword token.Pos; Stmt goast.Stmt; Body *Block }              // ForStmt | RangeStmt
+type Switch struct{ Keyword token.Pos; Stmt goast.Stmt; Lbrace token.Pos; Cases []*Case; Rbrace token.Pos }
+type Select struct{ Keyword token.Pos; Stmt *goast.SelectStmt; Lbrace token.Pos; Cases []*Case; Rbrace token.Pos }
+type Case   struct{ Keyword token.Pos; Clause goast.Stmt; Default bool; Colon token.Pos; Body []Node }
+type Block  struct{ Lbrace token.Pos; List []Node; Rbrace token.Pos }
 ```
 
-## internal/parser: entry point
+`Walk(v, n)` is `go/ast.Walk(walker{v}, n)`: go/ast.Walk calls `Visit` before
+its type switch and stops when `Visit` returns nil, so the adapter handles our
+nodes itself (visit, children, `Visit(nil)`) and returns nil, and wraps go/ast
+nodes again (LAB-011). Embedded statements walk header fields only. `Fprint`
+prints one line per node, `Kind start-end detail`, positions as line:col.
+
+New nodes for this phase: `Fragment` (TASK-001-04) and `Component`
+(TASK-005-02).
+
+# internal/parser
+
+## Entry point
 
 ```go
-package parser
-
 // ParseFile parses a .golpe file. It returns as much of the AST as it could
 // build and a scanner.ErrorList sorted by position.
 func ParseFile(fset *token.FileSet, filename string, src []byte) (*goast.File, error) {
@@ -195,39 +118,46 @@ func ParseFile(fset *token.FileSet, filename string, src []byte) (*goast.File, e
 }
 ```
 
-## Pass 1: finding templates and markup starts
+## Pass 1: templates and markup starts
 
-```go
-// At top level (depth 0), IDENT "template" followed by IDENT or "(" is a
-// template declaration (DEC-003). Inside its body, track the previous token:
-// a statement starts after ";" (incl. auto-inserted), "{", "}", ":" (labels,
-// case clauses) or at body start. There, LSS immediately followed by an
-// ASCII letter or "!" starts markup; ARROW ("<-") is Go (LAB-004).
-```
-
-go/scanner cannot continue past markup (an apostrophe in text would be
-scanned as a rune literal), so after each markup region the scanner is
-re-initialised on `src[end:]` with a fresh `token.File` of the right base.
+At top level, IDENT `template` with `IsTemplateKeyword(lit, next)` starts a
+template declaration. Inside its body, a statement starts after `;` (incl.
+auto-inserted), `{`, `}`, `:` or at body start. There, `LSS` immediately
+followed by an ASCII letter, `>` (fragment) or `!` (doctype/comment) starts
+markup; `ARROW` (`<-`) is Go (LAB-004). Markup inside a function literal is an
+error. go/scanner cannot continue past markup (an apostrophe in text would be
+a rune literal), so after each region it is re-initialised on `src[end:]`.
 
 ## Pass 2: markup parsing
 
 A byte-level recursive-descent parser:
 
-- `<name` attrs (`>` | `/>`), children until `</name>`; void elements end at `>`.
-- Children: `<` → element/close/comment; `{` → interpolation; a line whose
-  first token is `if`, `for`, `switch`, `select` → embedded statement;
-  inside an embedded body `}` closes it (then optional `else`), and in
-  switch/select bodies `case`/`default` at line start open a clause;
-  `//` or `/*` after whitespace at a node boundary → Go comment; otherwise text.
-- Interpolation extent: run go/scanner from the `{` counting braces, so
-  strings, runes, comments and composite/func literals are handled exactly.
-- Embedded header extent: go/scanner from the keyword to the first `{` at
-  paren/bracket depth 0, which is Go's own rule (composite literals in
-  headers need parentheses in Go too).
-- Raw text elements: find `</script` case-insensitively; no scanning inside.
+- **Tags:** `<name` attrs (`>` | `/>`), children until `</name>` (matched
+  ignoring ASCII case); void elements end at `>` and cannot have content;
+  `<>`…`</>` is a fragment. Raw text elements (`script`, `style`) end at
+  `</script` (case-insensitive) with no scanning inside; `textarea`/`title`
+  allow text and interpolations only; `pre`/`textarea` keep whitespace.
+  Component tags (non-element names) are classified with TASK-005-01's lists
+  and parsed by TASK-005-02.
+- **Attributes:** names as authored; `"…"`/`'…'` literal (no interpolation);
+  `{expr}`; bare. Duplicates and unquoted values are errors.
+- **Children, by line:** if the first Go token of a line is `if`, `for`,
+  `switch` or `select`, it starts an embedded statement (the line rule); in a
+  switch/select body `case`/`default` lines open clauses; a `}` line closes
+  the body and may continue with `else`. Otherwise: `<` → tag, comment or
+  close; `{` → interpolation; `//` or `/*` at a node boundary → Go comment
+  (kept in the mask so go/parser records it, dropped from output); anything
+  else → text.
+- **Interpolation extent:** go/scanner from the `{` counting braces, so
+  strings, runes, comments and composite/func literals are exact.
+- **Header extent:** go/scanner from the keyword to the first `{` at
+  paren/bracket depth 0 (Go's own rule).
+- **Whitespace (R22):** text runs collapse to one space; runs at the start or
+  end of an element's, fragment's or body's content are dropped.
+- **Errors:** line-rule failures carry the quoting hint (`{"for"}`).
 
-Each region records the tree plus a list of **fragments** (byte ranges that
-stay as Go in the mask) and **separators** (where ` ` / `;` go).
+Each region records the tree plus the **fragments** (byte ranges that stay Go
+in the mask) and **separators** (where ` `/`;` go).
 
 ## Pass 3: the mask
 
@@ -252,70 +182,59 @@ func mask(src []byte, regions []region) []byte {
 }
 ```
 
-Invariant (fuzzed): `len(mask(src)) == len(src)` and every `'\n'` stays at
-the same offset, so line:col never moves.
+Invariant (fuzzed): `len(mask(src)) == len(src)` and every `'\n'` keeps its
+offset, so line:col never moves. The test-only mask/graft in
+`internal/ast/fixture_test.go` is a working reference.
 
 ## Pass 5: grafting
 
-Walk every `BlockStmt` of each template body. Statements whose position
-lies inside a region's `[start, end)` are removed; the explicit EmptyStmt at
-`start` is replaced by `&ast.MarkupStmt{EmptyStmt: e, Root: …}`. Interpolation
-nodes take the `ExprStmt.X` found at their offset; embedded statement nodes
-take the `IfStmt`/`ForStmt`/`RangeStmt`/`SwitchStmt`/`TypeSwitchStmt`/
-`SelectStmt` found at their offset (their bodies, which only contain more
-skeleton, are discarded). Any *other* Go statement found inside an embedded
-body is an error (R15: "Go statements are not allowed inside markup").
-Then each template's `*goast.FuncDecl` is wrapped in `*ast.TemplateDecl`.
+Walk every `BlockStmt` of each template body. Statements inside a region's
+`[start, end)` are removed; the explicit EmptyStmt at `start` becomes
+`&ast.MarkupStmt{EmptyStmt: e, Root: …}`. Interpolations take the
+`ExprStmt.X` at their offset; embedded statements take the statement at
+their offset (header only). Any other Go statement inside an embedded body is
+an error ("Go statements are not allowed inside markup"). Each template's
+`*goast.FuncDecl` is wrapped in `*ast.TemplateDecl`.
 
 # Testing
 
-- **Unit tests** per pass, table-driven: scanner (template detection,
-  `<-`, labels), markup parser (every R10–R18 rule), mask (exact bytes),
-  graft.
-- **Golden tests**: `internal/parser/testdata/*.golpe` → a stable textual dump
-  of the AST (`*.ast.golden`), updated with `go test ./internal/parser -update`.
-  Includes the three examples of SPEC-001 and every error case
-  (`*.err.golden` holds `file:line:col: msg` lines).
-- **Superset test (R1)**: parse every `.go` file under `$(go env GOROOT)/src`
-  with both `go/parser` and `internal/parser`; the ASTs must print
-  identically. Skipped with `-short`.
-- **Fuzz**: `FuzzParseFile` (never panics; mask invariant holds; positions in
-  range), seeded from testdata.
+- **Unit tests** per pass, table-driven.
+- **Golden tests:** `internal/parser/testdata/*.golpe` → `*.ast.golden`
+  (`ast.Fprint`) and `*.err.golden` (`file:line:col: msg`), `-update` flag.
+- **Superset test (R1):** every `.go` file under GOROOT/src parses identically
+  with go/parser and internal/parser (skipped with `-short`).
+- **Fuzz:** `FuzzParseFile` (no panics; mask invariant; positions in range).
 
 # Laboratories
 
-Executable in `internal/labs/parserlab` (run with `go test ./internal/labs/...`):
+Executable in `internal/labs/parserlab` and `internal/ast`:
 
-| Lab     | Question                                                            | Result |
-|---------|---------------------------------------------------------------------|--------|
-| LAB-001 | Does a `;` placeholder survive go/parser as an explicit EmptyStmt at the exact offset? | ✅ yes, `Implicit=false`, line:col exact |
-| LAB-002 | Do embedded go/ast nodes satisfy the sealed `ast.Decl`/`ast.Stmt`?   | ✅ yes, promoted unexported methods |
-| LAB-003 | Does `ast.Walk` tolerate foreign nodes?                            | ❌ panics → own `Walk`/`Inspect` needed |
-| LAB-004 | Can go/scanner tell `<-ch` from `<li`?                              | ✅ `ARROW` vs `LSS IDENT` |
-| LAB-005 | Does one go/parser call over the skeleton mask yield every interpolation and header with original offsets? | ✅ yes, including `if/else` and comments |
-| LAB-006 | Do `/*line*/` directives move reported positions to `.golpe`?       | ✅ yes (used by [PLAN-002](/plans/002-code-generation.md)) |
-| LAB-007 | Do they survive gofmt?                                               | ⚠️ gofmt adds a space after the comment (column +1); emit `/*line f:L:C-1*/ ` instead, or `//line f:L:1` for column-1 code |
+| Lab | Question | Result |
+|-----|----------|--------|
+| LAB-001 | Does a `;` placeholder survive go/parser as an explicit EmptyStmt at the exact offset? | ✅ yes |
+| LAB-002 | Do embedded go/ast nodes satisfy the sealed `ast.Decl`/`ast.Stmt`? | ✅ yes |
+| LAB-003 | Does `ast.Walk` tolerate foreign nodes? | ❌ panics |
+| LAB-004 | Can go/scanner tell `<-ch` from `<li`? | ✅ `ARROW` vs `LSS IDENT` |
+| LAB-005 | Does one go/parser call over the skeleton mask yield every interpolation and header at original offsets? | ✅ yes |
+| LAB-006 | Do `/*line*/` directives move reported positions to `.golpe`? | ✅ yes |
+| LAB-007 | Do they survive gofmt? | ⚠️ gofmt adds a space; emit `/*line f:L:C-1*/ ` or `//line f:L:1` |
+| LAB-011 | Does go/ast.Walk call `Visit` before its type switch, so an adapter can intercept foreign nodes? | ✅ yes (`TestGoASTWalkVisitsBeforeTypeSwitch` in internal/ast) |
 
 # Risks
 
-- **Ambiguous text.** A text line starting with `if `/`for ` is parsed as an
-  embedded statement. Mitigation: only when the keyword is the first token
-  of the line *and* the header scans as Go up to a `{`; otherwise text. The
-  spec documents `{"if"}` as the escape.
-- **Error quality.** go/parser messages about the skeleton may mention
-  `;` or `func`. Mitigation: a small rewrite table in the error list,
-  covered by `*.err.golden` tests.
-- **Go grammar changes** are inherited for free, but a new statement form
-  starting with `<` would break R6 (none exists or is proposed).
+- **Line rule surprises.** A text line starting with `for`/`if` is a statement
+  by design; mitigated by the quoting hint in errors and golden tests.
+- **Error quality.** go/parser messages about the skeleton may mention `;` or
+  `func`; a small rewrite table, covered by `*.err.golden`.
+- **Go grammar changes** come for free, unless a statement form starting with
+  `<` appears (none exists or is proposed).
 
 # Slices
 
 1. [TASK-001-01 Project scaffold](/tasks/001-template-language/01-project-scaffold.md) ✅
-2. [TASK-001-02 Token extension](/tasks/001-template-language/02-token-extension.md)
-3. [TASK-001-03 AST nodes and walker](/tasks/001-template-language/03-ast-nodes.md)
-4. [TASK-001-04 Markup parser](/tasks/001-template-language/04-markup-parser.md)
+2. [TASK-001-02 Token extension](/tasks/001-template-language/02-token-extension.md) ✅
+3. [TASK-001-03 AST nodes and walker](/tasks/001-template-language/03-ast-nodes.md) ✅
+4. [TASK-001-04 Markup parser](/tasks/001-template-language/04-markup-parser.md) — ready
 5. [TASK-001-05 Embedded statements](/tasks/001-template-language/05-embedded-statements.md)
 6. [TASK-001-06 File parser: scan, mask, graft](/tasks/001-template-language/06-file-parser.md)
 7. [TASK-001-07 Conformance: superset, golden, fuzz](/tasks/001-template-language/07-conformance.md)
-
-02 and 03 can run in parallel; so can TASK-002-01 (runtime) with all of them.

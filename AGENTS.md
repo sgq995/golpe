@@ -2,8 +2,11 @@
 
 Golpe is a meta-language over Go: `.golpe` files are Go plus `template`
 declarations whose bodies switch into balanced HTML markup (with embedded
-`if`/`for`/`switch`/`select` and `{expr}`), compiled to plain Go functions
-returning `func(io.Writer) error`.
+`if`/`for`/`switch`/`select`, `{expr}`, fragments and component tags),
+compiled by one CLI into committed `_gen.go` files: plain Go functions
+returning `func(io.Writer) error` that import only the standard library.
+Scope is server-side templates only; deferred ideas live in
+`docs/knowledge/backlog.md`.
 
 ## The knowledge base is the source of truth
 
@@ -31,12 +34,14 @@ Conventions (types, frontmatter, IDs, links): `docs/knowledge/process/convention
 
 | Path              | What                                                  |
 |-------------------|-------------------------------------------------------|
-| `/` (package `golpe`) | public API and runtime used by generated code     |
-| `cmd/cli`         | the `golpe` CLI (`go build -o golpe ./cmd/cli`)       |
+| `/` (package `golpe`) | optional helpers; generated code never imports it |
+| `cmd/golpe`       | the `golpe` CLI, the only required tool               |
 | `internal/token`  | go/token extended with Golpe tokens                   |
 | `internal/ast`    | go/ast extended with template and markup nodes        |
 | `internal/parser` | `.golpe` parser (masks markup, reuses go/parser)      |
-| `internal/generator` | lowering to Go (planned)                           |
+| `internal/generator` | lowering to standard-library Go (planned)          |
+| `internal/resolve` | component declaration lookup (planned)              |
+| `internal/build`  | file discovery and generation for CLI and LSP (planned) |
 | `internal/okflint`| knowledge-base linter                                 |
 | `internal/labs`   | executable laboratories backing plan assumptions      |
 | `lsp`             | language server proxying gopls (planned)              |

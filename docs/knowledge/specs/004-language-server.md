@@ -6,7 +6,7 @@ description: golpe lsp gives editors Go-quality diagnostics, completion, hover a
 status: draft
 plan: PLAN-004
 tags: [lsp, tooling]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
 ---
 # Summary
 
@@ -35,9 +35,10 @@ generated Go, which is how templ's LSP works.
 
 # Requirements
 
-- **R1** `golpe lsp` MUST speak LSP 3.17 over stdio.
+- **R1** `golpe lsp`, a subcommand of the single CLI, MUST speak LSP 3.17 over
+  stdio.
 - **R2** On open/change of a `.golpe` file it MUST regenerate the Go in
-  memory and present it to gopls as the overlay of `x_golpe.go`.
+  memory and present it to gopls as the overlay of `x_gen.go`.
 - **R3** Diagnostics from gopls for generated files MUST be mapped to `.golpe`
   positions; Golpe syntax errors MUST be published too.
 - **R4** Completion, hover, signature help, definition, references and rename
@@ -63,3 +64,9 @@ HTML-aware features (tag/attribute completion, auto-closing tags), formatting.
 
 1. Discover gopls on `PATH`, or pin and `go run` a version?
 2. Ship editor extensions (VS Code) in this repo or separately?
+
+# Status
+
+Confirmed in the design interview (2026-11-03): the LSP proxies **gopls**,
+and work starts after the parser and generator ship; this spec stays a draft
+until then.

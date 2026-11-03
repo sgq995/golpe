@@ -6,7 +6,7 @@ description: golpe lsp sits between the editor and a gopls subprocess, keeps gen
 status: draft
 spec: SPEC-004
 tags: [lsp]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
 ---
 # Approach
 
@@ -14,8 +14,8 @@ Implements [SPEC-004](/specs/004-language-server.md). gopls cannot be linked
 as a library, so `golpe lsp` is a **proxy**: editor ⇄ golpe lsp ⇄ gopls
 (subprocess, stdio). For `.golpe` documents it regenerates Go on each
 change (parser + generator are pure functions of the bytes) and sends gopls
-`didOpen`/`didChange` for the virtual `x_golpe.go`; requests are rewritten
-`x.golpe:pos` → `x_golpe.go:pos'` and responses back.
+`didOpen`/`didChange` for the virtual `x_gen.go`; requests are rewritten
+`x.golpe:pos` → `x_gen.go:pos'` and responses back.
 
 # Architecture
 

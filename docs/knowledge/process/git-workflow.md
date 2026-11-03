@@ -4,7 +4,7 @@ id: PROC-GIT
 title: Git workflow
 description: Serial work is committed straight to main; parallel agents each work on a feature branch in their own git worktree and merge back to main.
 tags: [process, git, agents]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
 ---
 # Serial work (one agent at a time)
 
@@ -38,15 +38,21 @@ Use it only for slices that are ready (dependencies done) and whose
    `.worktrees/` is git-ignored. (Claude Code's Agent tool with
    `isolation: "worktree"` does the same thing automatically.)
 2. Each worker agent works only inside its worktree, follows the
-   [implementation workflow](/process/implementation-workflow.md), commits on
-   its branch and pushes it: `git push -u origin feat/TASK-001-02-token-extension`.
-3. The coordinator merges finished branches into `main` one at a time:
-   rebase the branch on the latest `main`, run `go test ./...`, then
-   fast-forward `main` and push. Knowledge-base conflicts (index.md,
-   log.md) are resolved by keeping both entries.
-4. Clean up: `git worktree remove .worktrees/TASK-001-02`,
-   `git branch -d feat/TASK-001-02-token-extension`, and delete the remote
-   branch.
+   [implementation workflow](/process/implementation-workflow.md) and commits
+   on its branch. Workers that share the clone with the coordinator do not
+   push; workers in separate sessions push their branch.
+3. **The coordinator owns shared docs during a parallel run:** workers edit
+   only their own slice file (and any plan or doc the brief hands them
+   explicitly), never `log.md`, `index.md` files, specs, decisions or other
+   plans. They report deviations in the slice's Notes and in their final
+   report; the coordinator folds them into the shared docs after merging.
+4. The coordinator reviews each finished branch, then merges them into `main`
+   one at a time: rebase the branch on the latest `main` (inside its
+   worktree), run `gofmt`, `go vet ./...` and `go test ./...`, fast-forward
+   `main`, and push `main` (plus the session branch in cloud sessions).
+5. Clean up: `git worktree remove .worktrees/TASK-001-02` and
+   `git branch -d feat/TASK-001-02-token-extension` (and the remote branch if
+   one was pushed).
 
 # Never
 

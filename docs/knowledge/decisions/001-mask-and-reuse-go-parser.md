@@ -3,10 +3,11 @@ type: Decision
 id: DEC-001
 title: Mask markup and reuse go/parser instead of forking it
 description: Parse .golpe files by masking markup into a same-length Go skeleton, parsing it with the standard go/parser, and grafting markup nodes that embed go/ast nodes back in.
-status: draft
-decision: proposed
+status: stable
+decision: accepted
 tags: [parser, architecture]
-generated: { by: claude-code/agent, at: 2026-11-03T00:00:00Z }
+generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+verified: { by: human:sgq995, at: 2026-11-03T03:12:42Z }
 ---
 # Context
 
@@ -48,8 +49,14 @@ for free, and gives byte-exact positions for diagnostics and the LSP.
 
 # Consequences
 
+Accepted by the maintainer in the design interview of 2026-11-03, after
+TASK-001-02 and TASK-001-03 confirmed the approach in code.
+
+
 - `internal/ast` needs its own `Walk`/`Inspect`; anything handed to
-  `go/printer` must be lowered to pure `go/ast` first.
+  `go/printer` must be lowered to pure `go/ast` first. Implemented as an
+  adapter around `go/ast.Walk`, which calls `Visit` before its type switch
+  (LAB-011 in [PLAN-001](/plans/001-template-language.md)).
 - Masking must preserve length and newlines exactly; this is the invariant
   the fuzz test guards (see [PLAN-001](/plans/001-template-language.md)).
 - Go syntax errors inside markup (for example in an `if` header) come from

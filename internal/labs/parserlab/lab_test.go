@@ -149,7 +149,7 @@ template NavItem(props NavItemProps) {
 func TestLab006LineDirectivesMapToGolpeSource(t *testing.T) {
 	gen := "package p\n\nfunc f() any {\n\treturn /*line nav.golpe:8:13*/props.Route\n}\n"
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "nav_golpe.go", gen, parser.ParseComments)
+	f, err := parser.ParseFile(fset, "nav_gen.go", gen, parser.ParseComments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestLab007LineDirectivesSurviveGofmt(t *testing.T) {
 			t.Fatal(err)
 		}
 		fset := token.NewFileSet()
-		f, err := parser.ParseFile(fset, "nav_golpe.go", out, parser.ParseComments)
+		f, err := parser.ParseFile(fset, "nav_gen.go", out, parser.ParseComments)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -6,7 +6,7 @@ description: Golpe extends Go with template declarations whose bodies switch fro
 status: draft
 plan: PLAN-001
 tags: [language, parser]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Summary
 
@@ -118,7 +118,8 @@ Scope is server-side templates only: no routing, no client-side reactivity
   values are the strings `"true"`/`"false"` (ARIA, `draggable`,
   `contenteditable`) must be given a string:
   `aria-busy={strconv.FormatBool(busy)}`. Attribute names are written as
-  authored (`viewBox`, `hx-get`, `@click`, `:class`). Duplicate names and
+  authored (`viewBox`, `hx-get`, `@click`, `:class`). Whitespace is allowed
+  around `=`. Duplicate names (compared ignoring ASCII case, as HTML does) and
   unquoted values (`class=btn`) are errors.
 - **R16 Text.** Characters other than `<`, `{` and `}` are text, written
   verbatim, so HTML entities such as `&nbsp;` work. A literal brace is written
@@ -150,8 +151,11 @@ Scope is server-side templates only: no routing, no client-side reactivity
   taken literally up to the matching close tag: no interpolation, no embedded
   statements, no whitespace changes.
 - **R20 Text-only and preformatted elements.** `<textarea>` and `<title>`
-  contain only text and interpolations. `<pre>` and `<textarea>` keep their
-  whitespace exactly as written.
+  contain only text and interpolations: tags, fragments and HTML comments are
+  errors there, while `//`, `/*` and lines starting with if/for/switch/select
+  are plain text. `<pre>` is ordinary content (tags, Go comments and the line
+  rule apply; use `<pre>{snippet}</pre>` for code samples). `<pre>` and
+  `<textarea>` keep their whitespace exactly as written.
 - **R21 Comments.** Go comments (`//`, `/* */`) MAY appear in markup at a node
   boundary (at the start of a line, or after whitespace following a tag or an
   interpolation); they are template-only and never written. Inside a run of
@@ -167,8 +171,9 @@ Scope is server-side templates only: no routing, no client-side reactivity
 ## Diagnostics
 
 - **R23** All errors MUST be reported as `file.golpe:line:col: message` at the
-  offending byte, and the parser SHOULD report every error in a file. Errors
-  caused by the line rule SHOULD hint at quoting (`write {"for"} to start a
+  offending byte, and the parser SHOULD report every error in a file, at most
+  one per line (as go/parser does). Errors caused by the line rule SHOULD hint
+  at quoting (`write {"for"} to start a
   text line with 'for'`).
 
 # Examples

@@ -8,13 +8,13 @@ plan: PLAN-005
 state: todo
 depends_on: [TASK-001-04, TASK-005-01]
 touches: [internal/ast, internal/parser/markup.go, internal/parser/markup_component_test.go]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Goal
 [SPEC-005](/specs/005-component-tags.md) R1, R4 (syntax), R5 in the parser.
 
 # Depends on
-[TASK-001-04](/tasks/001-template-language/04-markup-parser.md), [TASK-005-01](/tasks/005-component-tags/01-element-names.md)
+[TASK-001-04](/tasks/001-template-language/04-markup-parser.md) ✅, [TASK-005-01](/tasks/005-component-tags/01-element-names.md) ✅. Shares `internal/parser/markup.go` with TASK-001-05: run after it, not in parallel.
 
 # Todo
 - [ ] AST: `Component{Lt, Name goast.Expr, Attrs, SelfClosing, Close, EndPos}` with Walk/Fprint support

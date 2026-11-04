@@ -6,7 +6,7 @@ description: Classify tag names with element lists in internal/token, parse comp
 status: draft
 spec: SPEC-005
 tags: [parser, generator, composition]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Approach
 
@@ -28,12 +28,14 @@ resolution, lowering. Everything is syntactic: no go/types.
 
 ## Classification
 
-```go
-// IsElement reports whether name is an HTML, SVG or MathML element name,
-// ignoring ASCII case (DEC-007). Lists are generated from the WHATWG HTML,
-// SVG 2 and MathML Core indexes into a sorted table (go:generate, checked in).
-func IsElement(name string) bool
-```
+As built (TASK-005-01): `IsElement` is a binary search over one
+hand-maintained table of 202 names (113 HTML, 63 SVG 2, 31 MathML Core, shared
+names once), sorted by ASCII-lowercased name and compared with on-the-fly
+ASCII folding: no allocation, no Unicode folding. The published lists live in
+`elements_test.go`, which checks the table holds exactly them, sorted and
+without duplicates. Obsolete HTML elements (29) and SVG 1.1-only elements (18)
+are left out pending the maintainer's confirmation. `IsCustomElement` is
+`strings.Contains(name, "-")`.
 
 ## Resolution
 
@@ -84,7 +86,8 @@ generic, more than one parameter, a `func` not returning
 
 - **Name collisions** with elements (`Button`, `Header`) surprise users;
   the parser error for content in such tags should mention the rule.
-- **Element lists drift** as HTML evolves; regenerate them per release.
+- **Element lists drift** as HTML evolves; refresh the table by re-reading the
+  three sources (URLs and retrieval date are in `elements.go`).
 
 # Slices
 

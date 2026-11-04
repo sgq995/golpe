@@ -6,7 +6,7 @@ description: A tag that is not an HTML, SVG or MathML element or a custom elemen
 status: draft
 plan: PLAN-005
 tags: [language, composition]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Summary
 
@@ -42,7 +42,10 @@ there is no naming convention and no type-checking
   case, an element of HTML, SVG or MathML, or contains `-` (a custom element).
   Any other name must be a Go identifier or a qualified identifier `pkg.Name`
   and is a component tag. A qualified name is always a component. Anything
-  else is an error.
+  else is an error. The lists are the current standards (WHATWG HTML, SVG 2,
+  MathML Core; 202 names, retrieved 2026-11-04); obsolete elements such as
+  `center`, `font` or `marquee` are not markup, so `<center>` is a component
+  tag (pending the maintainer's confirmation).
 - **R2 Resolution.** The generator MUST find the declaration syntactically: a
   top-level `template` or `func` named `Name` in the package's `.golpe` and
   `.go` files (not `_gen.go`), or, for `pkg.Name`, in the source of the

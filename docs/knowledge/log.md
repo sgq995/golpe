@@ -1,5 +1,18 @@
 # Knowledge base update log
 
+## 2026-11-04
+* **Update**: Merged the second parallel run:
+  [TASK-001-04 Markup parser](/tasks/001-template-language/04-markup-parser.md),
+  [TASK-005-01 Element name lists](/tasks/005-component-tags/01-element-names.md) and
+  [TASK-006-01 Class and If](/tasks/006-optional-helpers/01-class-and-if.md).
+* **Update**: Folded the agents' notes into [SPEC-001](/specs/001-template-language.md) (R15, R20, R23),
+  [SPEC-002](/specs/002-code-generation.md) (R8: self-closing output),
+  [SPEC-005](/specs/005-component-tags.md) (R1: the element lists),
+  [SPEC-006](/specs/006-optional-helpers.md) (R3; criteria 1–2 met),
+  [PLAN-001](/plans/001-template-language.md) (as built: markup parsing, LAB-014) and
+  [PLAN-005](/plans/005-component-tags.md) (hand-maintained table).
+* **Update**: TASK-001-05 is ready; TASK-005-02 follows it because both edit `markup.go`.
+
 ## 2026-11-03 (later)
 * **Update**: Merged the first parallel run: [TASK-001-02](/tasks/001-template-language/02-token-extension.md),
   [TASK-001-03](/tasks/001-template-language/03-ast-nodes.md) and

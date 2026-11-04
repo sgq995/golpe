@@ -6,7 +6,7 @@ description: The root package github.com/sgq995/golpe offers small, optional hel
 status: draft
 plan: PLAN-006
 tags: [api]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Summary
 
@@ -35,6 +35,7 @@ concatenation, as long as it never becomes a dependency of generated code.
   ([DEC-002](/decisions/002-element-is-an-alias.md)).
 - **R3 Class.** `Class(parts ...string) string` joins the non-empty parts
   with single spaces, skipping empty ones the way `cmp.Or` skips zero values.
+  Parts are used as given: not trimmed, split, deduplicated or escaped.
 - **R4 If.** `If(cond bool, s string) string` returns `s` when `cond` is true,
   otherwise `""`.
 - **R5** Standard library only; no state; no generated-code entry points.
@@ -49,8 +50,8 @@ concatenation, as long as it never becomes a dependency of generated code.
 
 # Acceptance criteria
 
-- [ ] `Class()` is `""`; `Class("", "a", "", "b")` is `"a b"`.
-- [ ] `If(true, "x")` is `"x"`; `If(false, "x")` is `""`.
+- [x] `Class()` is `""`; `Class("", "a", "", "b")` is `"a b"`.
+- [x] `If(true, "x")` is `"x"`; `If(false, "x")` is `""`.
 - [ ] No generated golden file imports `github.com/sgq995/golpe`.
 
 # Out of scope

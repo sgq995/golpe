@@ -6,7 +6,7 @@ description: Each x.golpe compiles to a committed, gofmt-ed x_gen.go that uses o
 status: draft
 plan: PLAN-002
 tags: [generator]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Summary
 
@@ -80,7 +80,10 @@ golpe import, no runtime.
 ## Markup
 
 - **R8 Static output.** Tags, static attributes and text MUST be written
-  verbatim (after the whitespace rule of SPEC-001 R22), with adjacent static
+  verbatim (after the whitespace rule of SPEC-001 R22); a self-closing
+  non-void element is written as `<x …></x>` (HTML ignores `/>` there, so
+  `<script/>` would swallow the page) and a void element as `<x …>`, with
+  adjacent static
   bytes coalesced into one `io.WriteString`, also across consecutive markup
   statements with no Go code between them.
 - **R9 Values.** A value interpolation `{x}` MUST evaluate `x` once; a nil

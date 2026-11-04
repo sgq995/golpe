@@ -6,7 +6,7 @@ description: Pre-scan with go/scanner, parse markup with a hand-written parser, 
 status: draft
 spec: SPEC-001
 tags: [parser, token, ast]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Approach
 
@@ -40,7 +40,7 @@ identifiers to the parser; the generator handles them
 |---------|------|-------|
 | `internal/token` | [Golpe tokens](/entities/golpe-token.md); `FromGo`, `Go`, `String`, `Lookup`, `IsTemplateKeyword`, `IsVoid`, `IsRawText`, `IsEmbeddedKeyword`; element-name lists (TASK-005-01) | done (TASK-001-02) |
 | `internal/ast` | `TemplateDecl`, `MarkupStmt`, markup nodes, `Walk`, `Inspect`, `Fprint` | done (TASK-001-03) |
-| `internal/parser` | `ParseFile`, scanning, markup parsing, masking, grafting, errors | todo |
+| `internal/parser` | markup parsing and the error list (TASK-001-04); embedded statements, scanning, masking, grafting, `ParseFile` to come | in progress |
 
 Actuator: [Parser](/actuators/parser.md).
 
@@ -64,7 +64,7 @@ type TemplateDecl struct {
 
 type MarkupStmt struct {
 	*goast.EmptyStmt          // the ";" placeholder; Pos() is the markup start
-	Root Node                 // *Element, *Fragment (TASK-001-04) or *Doctype; End() is Root.End()
+	Root Node                 // *Element, *Fragment, *Doctype or *HTMLComment; End() is Root.End()
 }
 
 type Node interface{ goast.Node; markupNode() }   // every markup node
@@ -78,7 +78,8 @@ type Attr        struct{ Name string; NamePos token.Pos; Value AttrValue } // ni
 type StaticValue struct{ ValuePos token.Pos; Raw, Value string }           // Raw has quotes
 type Text        struct{ ValuePos token.Pos; Raw, Value string }
 type Interp      struct{ Lbrace token.Pos; X goast.Expr; Rbrace token.Pos }
-type Comment     struct{ Start token.Pos; Text string } // <!-- --> incl. delimiters; rename to HTMLComment (TASK-001-04)
+type Fragment    struct{ Lt token.Pos; Children []Node; Close, EndPos token.Pos } // <>…</>
+type HTMLComment struct{ Start token.Pos; Text string } // <!-- --> incl. delimiters
 type Doctype     struct{ Start token.Pos; Text string }
 
 // Embedded statements hold the go/ast statement go/parser built from the
@@ -97,8 +98,28 @@ nodes itself (visit, children, `Visit(nil)`) and returns nil, and wraps go/ast
 nodes again (LAB-011). Embedded statements walk header fields only. `Fprint`
 prints one line per node, `Kind start-end detail`, positions as line:col.
 
-New nodes for this phase: `Fragment` (TASK-001-04) and `Component`
-(TASK-005-02).
+Still to come: `Component` (TASK-005-02).
+
+# As built: markup parsing (TASK-001-04)
+
+- `lineFile(filename, base, src) *token.File` is a stand-in for the file
+  go/parser will create; with `base` read from the shared set just before
+  `ParseFile`, node positions are final (LAB-014) and errors get line:col.
+- `parseMarkup(file, src, start, errs) *region` parses one markup statement.
+  `region{start, end int; root ast.Node; keep []span; semis []int; interps []*ast.Interp}`:
+  the mask blanks `src[start:end]` except newlines and `keep` (interpolation
+  expressions, Go comments), then writes `;` at `start` and at each `semis`
+  offset (each interpolation's `}`).
+- `errorList` sorts and keeps the first error per line, as go/parser does.
+- Recovery: a close tag for an enclosing element reports once; a stray close
+  tag is reported and skipped; a content line starting with `}` reports
+  `expected </x>` and ends the region, so the Go block's `}` stays Go.
+- Choices recorded in SPEC-001: duplicate attributes ignore ASCII case,
+  whitespace around `=`, text-only `<textarea>`/`<title>`, `<pre>` as ordinary
+  content. Whitespace dropped by R22 produces no Text node. `<script/>` is
+  accepted, so the generator writes `<script></script>` (SPEC-002 R8).
+- TASK-001-05 replaces the `embedded` hook (today: "not supported yet") and
+  the `}`-line branch in `markup.go`.
 
 # internal/parser
 
@@ -219,6 +240,7 @@ Executable in `internal/labs/parserlab` and `internal/ast`:
 | LAB-006 | Do `/*line*/` directives move reported positions to `.golpe`? | ✅ yes |
 | LAB-007 | Do they survive gofmt? | ⚠️ gofmt adds a space; emit `/*line f:L:C-1*/ ` or `//line f:L:1` |
 | LAB-011 | Does go/ast.Walk call `Visit` before its type switch, so an adapter can intercept foreign nodes? | ✅ yes (`TestGoASTWalkVisitsBeforeTypeSwitch` in internal/ast) |
+| LAB-014 | Can markup positions be computed before go/parser creates the file? | ✅ yes: ParseFile adds the file at `fset.Base()`; pinned by internal/parser tests |
 
 # Risks
 
@@ -234,7 +256,7 @@ Executable in `internal/labs/parserlab` and `internal/ast`:
 1. [TASK-001-01 Project scaffold](/tasks/001-template-language/01-project-scaffold.md) ✅
 2. [TASK-001-02 Token extension](/tasks/001-template-language/02-token-extension.md) ✅
 3. [TASK-001-03 AST nodes and walker](/tasks/001-template-language/03-ast-nodes.md) ✅
-4. [TASK-001-04 Markup parser](/tasks/001-template-language/04-markup-parser.md) — ready
-5. [TASK-001-05 Embedded statements](/tasks/001-template-language/05-embedded-statements.md)
+4. [TASK-001-04 Markup parser](/tasks/001-template-language/04-markup-parser.md) ✅
+5. [TASK-001-05 Embedded statements](/tasks/001-template-language/05-embedded-statements.md) — ready
 6. [TASK-001-06 File parser: scan, mask, graft](/tasks/001-template-language/06-file-parser.md)
 7. [TASK-001-07 Conformance: superset, golden, fuzz](/tasks/001-template-language/07-conformance.md)

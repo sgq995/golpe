@@ -7,14 +7,14 @@ spec: SPEC-001
 plan: PLAN-001
 state: todo
 depends_on: [TASK-001-04]
-touches: [internal/parser/markup_stmt.go, internal/parser/markup_stmt_test.go]
-generated: { by: claude-code/agent, at: 2026-11-03T03:12:42Z }
+touches: [internal/parser/markup.go, internal/parser/markup_test.go, internal/parser/markup_stmt.go, internal/parser/markup_stmt_test.go]
+generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
 ---
 # Goal
 [Embedded statements](/entities/embedded-statement.md) by the line rule, [SPEC-001](/specs/001-template-language.md) R18. Header text stays in the mask as Go so go/parser parses it (LAB-005).
 
 # Depends on
-[TASK-001-04](/tasks/001-template-language/04-markup-parser.md)
+[TASK-001-04](/tasks/001-template-language/04-markup-parser.md) ✅. Replaces the `embedded` hook and the `}`-line branch in `markup.go` (see PLAN-001 "As built: markup parsing"). Shares `markup.go` with TASK-005-02, so the two run one after the other.
 
 # Todo
 - [ ] Tests first: `if`/`else if`/`else`; `for` 3-clause, condition-only, infinite, `range` (incl. `range 10`); expression switch, type switch, switch with init; `select` with send/receive cases; nested statements; one-line body `if ok { <b>yes</b> }`

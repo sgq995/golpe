@@ -11,7 +11,7 @@ import (
 
 // pageSrc exercises every node type. Markup sits inside a Go if, a function
 // literal, a Go case clause and the template body, and inside a function
-// literal that is itself an interpolation.
+// literal that is itself an interpolation; a fragment ends the body.
 const pageSrc = `package p
 
 template Page[T any](title string, items []T, sel bool, ch chan string) {
@@ -56,6 +56,7 @@ template Page[T any](title string, items []T, sel bool, ch chan string) {
 		}
 		<br>
 	</div>
+	<>{title}!</>
 }
 `
 
@@ -108,6 +109,18 @@ func (b *builder) el(name string, attrs []func() *Attr, kids ...func() Node) *El
 	e.Close = b.at("</" + name)
 	e.EndPos = b.at(">") + 1
 	return e
+}
+
+// frag builds <>kids</>.
+func (b *builder) frag(kids ...func() Node) *Fragment {
+	f := &Fragment{Lt: b.at("<>")}
+	for _, k := range kids {
+		f.Children = append(f.Children, k())
+	}
+	f.Close = b.at("</>")
+	f.EndPos = f.Close + 3
+	b.add(f)
+	return f
 }
 
 // void builds a start tag without an end tag, like <br>.
@@ -211,6 +224,7 @@ type page struct {
 	nodes []goast.Node // every Golpe node, TemplateDecl included
 
 	ul, p, hr, doctype, div, lit *MarkupStmt
+	frag                         *MarkupStmt
 	li, br, hrEl                 *Element
 	attrs                        []*Attr // class, hidden, data-n
 	ifSel, ifElse                *If
@@ -221,7 +235,7 @@ type page struct {
 	sel                          *Select
 	cases                        []*Case // switch case, switch default, select case, select default
 	funcInterp                   *Interp
-	comment                      *Comment
+	comment                      *HTMLComment
 }
 
 func newPage(t testing.TB) *page {
@@ -255,7 +269,7 @@ func newPage(t testing.TB) *page {
 	}())
 	pg.div = b.markup(b.el("div", nil,
 		func() Node {
-			pg.comment = &Comment{Start: b.at("<!-- note -->"), Text: "<!-- note -->"}
+			pg.comment = &HTMLComment{Start: b.at("<!-- note -->"), Text: "<!-- note -->"}
 			b.add(pg.comment)
 			return pg.comment
 		},
@@ -305,8 +319,9 @@ func newPage(t testing.TB) *page {
 		func() Node { pg.br = b.void("br"); return pg.br },
 	))
 	pg.cases = append(slices.Clone(pg.sw.Cases), pg.sel.Cases...)
+	pg.frag = b.markup(b.frag(func() Node { return b.interp() }, b.text("!", "!")))
 
-	stmts := []*MarkupStmt{pg.ul, pg.p, pg.hr, pg.doctype, pg.div, pg.lit}
+	stmts := []*MarkupStmt{pg.ul, pg.p, pg.hr, pg.doctype, pg.div, pg.lit, pg.frag}
 	pg.file, pg.tmpl, pg.mask = parseSkeleton(t, pg.fset, pageSrc, stmts)
 	pg.nodes = append(b.nodes, pg.tmpl)
 	return pg
@@ -503,7 +518,7 @@ func graft(t testing.TB, f *goast.File, src string, base int, stmts []*MarkupStm
 
 // TestPageFixture checks the fixture itself: the skeleton keeps length and
 // newlines, has the shape of PLAN-001's mask (shown with whitespace runs
-// collapsed), and the graft left six statements in the template body.
+// collapsed), and the graft left seven statements in the template body.
 func TestPageFixture(t *testing.T) {
 	pg := newPage(t)
 	for i := range pageSrc {
@@ -559,12 +574,13 @@ default:
 }
 
 
+; title;
 }
 `
 	if got := strings.Join(lines, "\n"); got != want {
 		t.Errorf("mask (whitespace collapsed) =\n%s\nwant\n%s", got, want)
 	}
-	if got := len(pg.tmpl.Body.List); got != 6 {
-		t.Errorf("template body has %d statements, want 6 (n :=, if, f :=, switch, doctype, div)", got)
+	if got := len(pg.tmpl.Body.List); got != 7 {
+		t.Errorf("template body has %d statements, want 7 (n :=, if, f :=, switch, doctype, div, fragment)", got)
 	}
 }

@@ -16,11 +16,13 @@
 //     case clause or a function literal body.
 //
 // Below a MarkupStmt the tree is made of markup nodes, which implement
-// [Node]: [Element], [Attr], [StaticValue], [Text], [Interp], [Comment],
-// [Doctype], and the embedded statements [If], [For], [Switch] and [Select]
-// with their parts [Case] and [Block]. Go code inside markup is held as
-// go/ast nodes: Interp.X is a go/ast.Expr, and each embedded statement keeps
-// the go/ast statement that go/parser built from the mask.
+// [Node]: [Element], [Fragment], [Attr], [StaticValue], [Text], [Interp],
+// [HTMLComment], [Doctype], and the embedded statements [If], [For],
+// [Switch] and [Select] with their parts [Case] and [Block]. Go code inside
+// markup is held as go/ast nodes: Interp.X is a go/ast.Expr, and each
+// embedded statement keeps the go/ast statement that go/parser built from
+// the mask. Go comments inside markup are not markup nodes: the mask keeps
+// them, so go/parser records them in File.Comments.
 //
 // Embedded statements use only the header of that go/ast statement: Init
 // and Cond of an IfStmt; Init, Cond and Post of a ForStmt; Key, Value and X
@@ -78,11 +80,14 @@
 //	Element         the tag name, then "self-closing" and close=line:col of
 //	                the end tag, when present; children are the attributes,
 //	                then the content
+//	Fragment        close=line:col of the end tag </>, when present;
+//	                children are the content
 //	Attr            the name; the child is the value, if any
 //	StaticValue     the value, Go-quoted
 //	Text            the value (after whitespace normalisation), Go-quoted
 //	Interp          {X} with X as Go source, or {...} while X is nil
-//	Comment         the comment text, Go-quoted (HTML and go/ast comments)
+//	HTMLComment     the comment text, delimiters included, Go-quoted
+//	Comment         (a go/ast comment) the comment text, Go-quoted
 //	Doctype         the doctype text, Go-quoted
 //	If, For,        the header as Go source: "if x := f(); x > 0",
 //	Switch, Select, "for i, v := range items", "case 0, 1:", "default:".
@@ -179,7 +184,7 @@ func (d *TemplateDecl) End() token.Pos {
 // "<". End is the end of the root.
 type MarkupStmt struct {
 	*goast.EmptyStmt
-	Root Node // *Element or *Doctype
+	Root Node // *Element, *Fragment, *Doctype or *HTMLComment
 }
 
 // Pos returns the position of the first byte of the markup.
@@ -212,7 +217,7 @@ type Element struct {
 	Name        string    // as written: div, my-widget, svg:path
 	Attrs       []*Attr
 	SelfClosing bool      // the start tag ends with "/>"
-	Children    []Node    // *Element, *Text, *Interp, *Comment, *Doctype, *If, *For, *Switch, *Select
+	Children    []Node    // *Element, *Fragment, *Text, *Interp, *HTMLComment, *If, *For, *Switch, *Select
 	Close       token.Pos // position of "<" in "</name>"; NoPos without end tag
 	EndPos      token.Pos // position after the last ">" of the element
 }
@@ -231,6 +236,29 @@ func (e *Element) End() token.Pos {
 		return e.Attrs[len(e.Attrs)-1].End()
 	}
 	return offset(e.Lt, len("<")+len(e.Name))
+}
+
+// A Fragment is <>children</>: it renders only its content (SPEC-001 R8),
+// as in <>{p.Children(writer())}</>.
+type Fragment struct {
+	Lt       token.Pos // position of "<" in "<>"
+	Children []Node    // as in Element.Children
+	Close    token.Pos // position of "<" in "</>"; NoPos without end tag
+	EndPos   token.Pos // position after the ">" of "</>"
+}
+
+func (f *Fragment) Pos() token.Pos { return f.Lt }
+
+func (f *Fragment) End() token.Pos {
+	switch {
+	case f.EndPos.IsValid():
+		return f.EndPos
+	case f.Close.IsValid(): // "</" not closed by ">"
+		return offset(f.Close, len("</"))
+	case len(f.Children) > 0:
+		return f.Children[len(f.Children)-1].End()
+	}
+	return offset(f.Lt, len("<>"))
 }
 
 // An Attr is an attribute of a start tag: name, name="v", name='v' or
@@ -289,15 +317,16 @@ func (x *Interp) End() token.Pos {
 	return offset(x.Lbrace, len("{"))
 }
 
-// A Comment is an HTML comment, <!-- … -->. Go comments in markup are not
-// markup nodes.
-type Comment struct {
+// An HTMLComment is an HTML comment, <!-- … -->, which is copied to the
+// output. Go comments in markup are not markup nodes; go/parser records them
+// as go/ast comments in File.Comments.
+type HTMLComment struct {
 	Start token.Pos // position of "<"
 	Text  string    // source text, delimiters included
 }
 
-func (c *Comment) Pos() token.Pos { return c.Start }
-func (c *Comment) End() token.Pos { return offset(c.Start, len(c.Text)) }
+func (c *HTMLComment) Pos() token.Pos { return c.Start }
+func (c *HTMLComment) End() token.Pos { return offset(c.Start, len(c.Text)) }
 
 // A Doctype is a doctype declaration, <!DOCTYPE …>.
 type Doctype struct {
@@ -437,11 +466,12 @@ func offset(p token.Pos, n int) token.Pos {
 }
 
 func (*Element) markupNode()     {}
+func (*Fragment) markupNode()    {}
 func (*Attr) markupNode()        {}
 func (*StaticValue) markupNode() {}
 func (*Text) markupNode()        {}
 func (*Interp) markupNode()      {}
-func (*Comment) markupNode()     {}
+func (*HTMLComment) markupNode() {}
 func (*Doctype) markupNode()     {}
 func (*If) markupNode()          {}
 func (*For) markupNode()         {}
@@ -461,9 +491,10 @@ var (
 	_ AttrValue = (*StaticValue)(nil)
 	_ AttrValue = (*Interp)(nil)
 	_ Node      = (*Element)(nil)
+	_ Node      = (*Fragment)(nil)
 	_ Node      = (*Attr)(nil)
 	_ Node      = (*Text)(nil)
-	_ Node      = (*Comment)(nil)
+	_ Node      = (*HTMLComment)(nil)
 	_ Node      = (*Doctype)(nil)
 	_ Node      = (*If)(nil)
 	_ Node      = (*For)(nil)

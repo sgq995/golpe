@@ -20,9 +20,9 @@ func dump(t *testing.T, fset *token.FileSet, n goast.Node) string {
 
 func TestFprintPage(t *testing.T) {
 	pg := newPage(t)
-	want := `File 1:1-45:2 package p
-  TemplateDecl 3:1-45:2 template Page[T any](title string, items []T, sel bool, ch chan string)
-    BlockStmt 3:73-45:2
+	want := `File 1:1-46:2 package p
+  TemplateDecl 3:1-46:2 template Page[T any](title string, items []T, sel bool, ch chan string)
+    BlockStmt 3:73-46:2
       AssignStmt 4:2-4:17 n := len(items)
       IfStmt 5:2-11:3 if n > 0
         BlockStmt 5:11-11:3
@@ -56,7 +56,7 @@ func TestFprintPage(t *testing.T) {
         Doctype 20:2-20:17 "<!DOCTYPE html>"
       MarkupStmt 21:2-44:8
         Element 21:2-44:8 div close=44:2
-          Comment 22:3-22:16 "<!-- note -->"
+          HTMLComment 22:3-22:16 "<!-- note -->"
           Interp 23:3-23:8 {f()}
           Interp 24:3-24:34
             FuncLit 24:4-24:33 func() element
@@ -85,6 +85,10 @@ func TestFprintPage(t *testing.T) {
               Interp 40:4-40:7 {v}
             Case 41:3-41:11 default:
           Element 43:3-43:7 br
+      MarkupStmt 45:2-45:15
+        Fragment 45:2-45:15 close=45:12
+          Interp 45:4-45:11 {title}
+          Text 45:11-45:12 "!"
 `
 	if got := dump(t, pg.fset, pg.file); got != want {
 		t.Errorf("dump:\n%s\nwant:\n%s", got, want)

@@ -122,6 +122,7 @@ func TestInspectAncestors(t *testing.T) {
 		pg.doctype: "File TemplateDecl BlockStmt",
 		pg.div:     "File TemplateDecl BlockStmt",
 		pg.lit:     "File TemplateDecl BlockStmt MarkupStmt Element Interp FuncLit BlockStmt",
+		pg.frag:    "File TemplateDecl BlockStmt",
 	}
 	var stack []goast.Node
 	got := map[*MarkupStmt]string{}
@@ -311,8 +312,9 @@ func TestWalkAllNodes(t *testing.T) {
 				{Name: "hidden"},
 			},
 			Children: []Node{
-				&Comment{Text: "<!-- c -->"},
+				&HTMLComment{Text: "<!-- c -->"},
 				&Doctype{Text: "<!DOCTYPE html>"},
+				&Fragment{Children: []Node{&Text{Value: "f"}}},
 				&If{Stmt: stmts[0].(*goast.IfStmt), Body: &Block{List: []Node{&Text{Value: "t"}}}},
 			},
 		}}}},
@@ -325,14 +327,14 @@ func TestWalkAllNodes(t *testing.T) {
 		return true
 	})
 	want := `File p TemplateDecl CommentGroup Comment FieldList Field c Card View FuncType FieldList BlockStmt ` +
-		`MarkupStmt <a> Attr Interp url Attr StaticValue Attr Comment Doctype If c Block "t"`
+		`MarkupStmt <a> Attr Interp url Attr StaticValue Attr HTMLComment Doctype Fragment "f" If c Block "t"`
 	if s := strings.Join(got, " "); s != want {
 		t.Errorf("visited\n%s\nwant\n%s", s, want)
 	}
 
 	// Empty shells never panic.
 	for _, n := range []goast.Node{&TemplateDecl{}, &TemplateDecl{FuncDecl: &goast.FuncDecl{}}, &MarkupStmt{},
-		&Attr{}, &Interp{}, &If{}, &For{}, &Switch{}, &Select{}, &Case{}, &Block{}, &Element{}} {
+		&Attr{}, &Interp{}, &If{}, &For{}, &Switch{}, &Select{}, &Case{}, &Block{}, &Element{}, &Fragment{}} {
 		Inspect(n, func(goast.Node) bool { return true })
 	}
 }

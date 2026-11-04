@@ -68,9 +68,11 @@ func walkGolpe(v Visitor, node goast.Node) bool {
 	case *Element:
 		walkList(v, n.Attrs)
 		walkList(v, n.Children)
+	case *Fragment:
+		walkList(v, n.Children)
 	case *Attr:
 		walkOpt(v, n.Value)
-	case *StaticValue, *Text, *Comment, *Doctype:
+	case *StaticValue, *Text, *HTMLComment, *Doctype:
 		// no children
 	case *Interp:
 		walkOpt(v, n.X)

@@ -66,6 +66,13 @@ func (d *dumper) node(n goast.Node) {
 		}
 		d.line(n, detail)
 		d.kids(children(n)...)
+	case *Fragment:
+		detail := ""
+		if n.Close.IsValid() {
+			detail = "close=" + d.pos(n.Close)
+		}
+		d.line(n, detail)
+		d.kids(children(n)...)
 	case *Attr:
 		d.line(n, n.Name)
 		d.kids(children(n)...)
@@ -82,7 +89,7 @@ func (d *dumper) node(n goast.Node) {
 			d.line(n, "")
 			d.kids(n.X)
 		}
-	case *Comment:
+	case *HTMLComment:
 		d.line(n, strconv.Quote(n.Text))
 	case *Doctype:
 		d.line(n, strconv.Quote(n.Text))

@@ -28,7 +28,7 @@ func TestPosEnd(t *testing.T) {
 		n    goast.Node
 		want string
 	}{
-		{"TemplateDecl", pg.tmpl, "3:1-45:2"},
+		{"TemplateDecl", pg.tmpl, "3:1-46:2"},
 		{"MarkupStmt", pg.ul, "6:3-10:8"},
 		{"Element", elem(pg.ul), "6:3-10:8"},
 		{"Element nested", pg.li, "8:4-8:22"},
@@ -44,7 +44,7 @@ func TestPosEnd(t *testing.T) {
 		{"MarkupStmt in func literal interp", pg.lit, "24:21-24:31"},
 		{"Text", pg.li.Children[1], "8:11-8:13"},
 		{"Text raw spans lines", pg.off, "29:11-31:3"},
-		{"Comment", pg.comment, "22:3-22:16"},
+		{"HTMLComment", pg.comment, "22:3-22:16"},
 		{"MarkupStmt doctype", pg.doctype, "20:2-20:17"},
 		{"Doctype", pg.doctype.Root, "20:2-20:17"},
 		{"For", pg.forNode, "7:3-9:4"},
@@ -61,7 +61,9 @@ func TestPosEnd(t *testing.T) {
 		{"Case empty default", pg.cases[3], "41:3-41:11"},
 		{"MarkupStmt div", pg.div, "21:2-44:8"},
 		{"MarkupStmt in func literal", pg.p, "13:3-13:15"},
-		{"File", pg.file, "1:1-45:2"},
+		{"MarkupStmt fragment", pg.frag, "45:2-45:15"},
+		{"Fragment", pg.frag.Root, "45:2-45:15"},
+		{"File", pg.file, "1:1-46:2"},
 	}
 	for _, c := range cases {
 		if got := span(pg.fset, c.n); got != c.want {
@@ -98,7 +100,11 @@ func TestPosEndPartial(t *testing.T) {
 		{"Interp pre-graft", &Interp{Lbrace: at(10), Rbrace: at(13)}, 10, 14},
 		{"Interp bare", &Interp{Lbrace: at(10)}, 10, 11},
 		{"StaticValue", &StaticValue{ValuePos: at(2), Raw: `'a"b'`, Value: `a"b`}, 2, 7},
-		{"Comment", &Comment{Start: at(0), Text: "<!-- x -->"}, 0, 10},
+		{"HTMLComment", &HTMLComment{Start: at(0), Text: "<!-- x -->"}, 0, 10},
+		{"Fragment unterminated with children", &Fragment{Lt: at(0), Children: []Node{text}}, 0, 8},
+		{"Fragment end tag without >", &Fragment{Lt: at(0), Close: at(20)}, 0, 22},
+		{"Fragment empty unterminated", &Fragment{Lt: at(0)}, 0, 2},
+		{"Fragment NoPos", &Fragment{}, -1, -1},
 		{"Doctype", &Doctype{Start: at(0), Text: "<!doctype html>"}, 0, 15},
 		{"If without body", &If{Keyword: at(4)}, 4, 6},
 		{"If without else", &If{Keyword: at(4), Body: &Block{Lbrace: at(10), Rbrace: at(20)}}, 4, 21},
@@ -151,7 +157,7 @@ func TestInterfaces(t *testing.T) {
 	if _, ok := stmt.(Node); ok {
 		t.Error("MarkupStmt must not be a markup Node")
 	}
-	markup := []goast.Node{&Element{}, &Attr{}, &StaticValue{}, &Text{}, &Interp{}, &Comment{},
+	markup := []goast.Node{&Element{}, &Fragment{}, &Attr{}, &StaticValue{}, &Text{}, &Interp{}, &HTMLComment{},
 		&Doctype{}, &If{}, &For{}, &Switch{}, &Select{}, &Case{}, &Block{}}
 	for _, n := range markup {
 		if _, ok := n.(Node); !ok {

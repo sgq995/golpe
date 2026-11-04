@@ -6,7 +6,7 @@ description: Golpe extends Go with template declarations whose bodies switch fro
 status: draft
 plan: PLAN-001
 tags: [language, parser]
-generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
+generated: { by: claude-code/agent, at: 2026-11-04T20:27:08Z }
 ---
 # Summary
 
@@ -143,10 +143,15 @@ Scope is server-side templates only: no routing, no client-side reactivity
   - Bodies contain only markup: tags, text, interpolations, fragments,
     component tags and nested embedded statements. Go statements are errors.
   - Inside an embedded `switch`/`select` body, lines starting with `case` or
-    `default` open clauses (Go grammar up to `:`).
+    `default` open clauses (Go grammar up to `:`). Content before the first
+    clause is an error.
   - A line starting with `}` closes the body; `else` / `else if` must follow
-    that `}` on the same line, as in Go.
-  - A short body may stay on one line: `if ok { <b>yes</b> }`.
+    that `}` on the same line, as in Go (a line starting with `else` is an
+    error).
+  - A short body may stay on one line: `if ok { <b>yes</b> }`. Inside a body,
+    a `}` that is not part of an interpolation closes it wherever it is on the
+    line; after the statement's last `}`, the rest of the line is content
+    (`if ok { yes } and more`).
 - **R19 Raw text elements.** The content of `<script>` and `<style>` MUST be
   taken literally up to the matching close tag: no interpolation, no embedded
   statements, no whitespace changes.
@@ -155,7 +160,10 @@ Scope is server-side templates only: no routing, no client-side reactivity
   errors there, while `//`, `/*` and lines starting with if/for/switch/select
   are plain text. `<pre>` is ordinary content (tags, Go comments and the line
   rule apply; use `<pre>{snippet}</pre>` for code samples). `<pre>` and
-  `<textarea>` keep their whitespace exactly as written.
+  `<textarea>` keep their whitespace exactly as written, except that the
+  lines of embedded statements add none: in `<pre>`, the indentation before a
+  keyword, a `case`/`default` or a line-starting `}`, and the end of the line
+  after a header's `{`, a clause's `:` or a closing `}`, are not content.
 - **R21 Comments.** Go comments (`//`, `/* */`) MAY appear in markup at a node
   boundary (at the start of a line, or after whitespace following a tag or an
   interpolation); they are template-only and never written. Inside a run of

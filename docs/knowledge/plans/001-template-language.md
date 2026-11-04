@@ -6,7 +6,7 @@ description: Pre-scan with go/scanner, parse markup with a hand-written parser, 
 status: draft
 spec: SPEC-001
 tags: [parser, token, ast]
-generated: { by: claude-code/agent, at: 2026-11-04T10:36:16Z }
+generated: { by: claude-code/agent, at: 2026-11-04T20:27:08Z }
 ---
 # Approach
 
@@ -40,7 +40,7 @@ identifiers to the parser; the generator handles them
 |---------|------|-------|
 | `internal/token` | [Golpe tokens](/entities/golpe-token.md); `FromGo`, `Go`, `String`, `Lookup`, `IsTemplateKeyword`, `IsVoid`, `IsRawText`, `IsEmbeddedKeyword`; element-name lists (TASK-005-01) | done (TASK-001-02) |
 | `internal/ast` | `TemplateDecl`, `MarkupStmt`, markup nodes, `Walk`, `Inspect`, `Fprint` | done (TASK-001-03) |
-| `internal/parser` | markup parsing and the error list (TASK-001-04); embedded statements, scanning, masking, grafting, `ParseFile` to come | in progress |
+| `internal/parser` | markup parsing and the error list (TASK-001-04); embedded statements (TASK-001-05); scanning, masking, grafting, `ParseFile` to come | in progress |
 
 Actuator: [Parser](/actuators/parser.md).
 
@@ -118,8 +118,38 @@ Still to come: `Component` (TASK-005-02).
   whitespace around `=`, text-only `<textarea>`/`<title>`, `<pre>` as ordinary
   content. Whitespace dropped by R22 produces no Text node. `<script/>` is
   accepted, so the generator writes `<script></script>` (SPEC-002 R8).
-- TASK-001-05 replaces the `embedded` hook (today: "not supported yet") and
-  the `}`-line branch in `markup.go`.
+- TASK-001-05 replaced the `embedded` hook and the `}`-line branch (see
+  below): a content line starting with `}` now closes the innermost open
+  body, and ends the region only when no body is open.
+
+# As built: embedded statements (TASK-001-05)
+
+In `markup_stmt.go`; details and decisions in the
+[slice](/tasks/001-template-language/05-embedded-statements.md).
+
+- **Frames.** A body is a frame too (`body`; `clauses` for switch/select,
+  where a `case`/`default` line ends the content). A `}` closes a body
+  anywhere on a line; a close tag of an enclosing element ends a body with
+  `expected '}', found </x>`; a `}` line inside an element nested in a body
+  reports `expected </x>, found '}'` and closes that body (unwinding).
+- **Header extent.** Every `{` token outside brackets is a candidate, in
+  order; the first for which `src[keyword:candidate] + "{}"` parses with
+  go/parser (in `package p;func _(){…}`) as the statement with its body there
+  ends the header. Bounded by EOF, an unmatched closing bracket, too many `;`
+  outside brackets (if/switch 1, for 2, select 0) and `</`. Clause headers end
+  at the first `:` token outside brackets and are checked in a
+  `switch{…}`/`select{…}` wrapper.
+- **Extra keep spans.** Each valid header through its `{`; `else {` or
+  `else` (before an `if` header); each clause through its `:`; each closing
+  `}`. **Extra semis:** the byte after a statement's last `}` when the line
+  goes on (`if ok { } x;` is not Go). **New `region.stmts`:** the kept
+  `If`/`For`/`Switch`/`Select`/`Case` nodes, in keyword order, for the graft.
+- **Invalid headers** keep nothing (go/parser cascades badly on them): the
+  error carries the quoting hint; if the line ends with `{` the statement is
+  parsed for recovery, else the line is text. Content before the first
+  clause is reported and dropped with its Go parts.
+- **Whitespace.** Bodies are normalised like element content (R22); in
+  `<pre>` a statement line adds no whitespace (SPEC-001 R20).
 
 # internal/parser
 
@@ -171,8 +201,11 @@ A byte-level recursive-descent parser:
   else → text.
 - **Interpolation extent:** go/scanner from the `{` counting braces, so
   strings, runes, comments and composite/func literals are exact.
-- **Header extent:** go/scanner from the keyword to the first `{` at
-  paren/bracket depth 0 (Go's own rule).
+- **Header extent:** not simply the first `{` at paren/bracket depth 0:
+  `for _, x := range []int{1, 2} {` and
+  `if f := func() bool { return true }; f() {` are valid Go. Each `{` outside
+  brackets is a candidate, and the first one go/parser accepts as the body's
+  ends the header (see "As built: embedded statements").
 - **Whitespace (R22):** text runs collapse to one space; runs at the start or
   end of an element's, fragment's or body's content are dropped.
 - **Errors:** line-rule failures carry the quoting hint (`{"for"}`).
@@ -212,8 +245,8 @@ offset, so line:col never moves. The test-only mask/graft in
 Walk every `BlockStmt` of each template body. Statements inside a region's
 `[start, end)` are removed; the explicit EmptyStmt at `start` becomes
 `&ast.MarkupStmt{EmptyStmt: e, Root: …}`. Interpolations take the
-`ExprStmt.X` at their offset; embedded statements take the statement at
-their offset (header only). Any other Go statement inside an embedded body is
+`ExprStmt.X` at their offset; embedded statements (`region.stmts`) take the
+statement at their keyword (header only). Any other Go statement inside an embedded body is
 an error ("Go statements are not allowed inside markup"). Each template's
 `*goast.FuncDecl` is wrapped in `*ast.TemplateDecl`.
 
@@ -257,6 +290,6 @@ Executable in `internal/labs/parserlab` and `internal/ast`:
 2. [TASK-001-02 Token extension](/tasks/001-template-language/02-token-extension.md) ✅
 3. [TASK-001-03 AST nodes and walker](/tasks/001-template-language/03-ast-nodes.md) ✅
 4. [TASK-001-04 Markup parser](/tasks/001-template-language/04-markup-parser.md) ✅
-5. [TASK-001-05 Embedded statements](/tasks/001-template-language/05-embedded-statements.md) — ready
-6. [TASK-001-06 File parser: scan, mask, graft](/tasks/001-template-language/06-file-parser.md)
+5. [TASK-001-05 Embedded statements](/tasks/001-template-language/05-embedded-statements.md) ✅
+6. [TASK-001-06 File parser: scan, mask, graft](/tasks/001-template-language/06-file-parser.md) — ready
 7. [TASK-001-07 Conformance: superset, golden, fuzz](/tasks/001-template-language/07-conformance.md)

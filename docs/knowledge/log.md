@@ -1,5 +1,16 @@
 # Knowledge base update log
 
+## 2026-11-04 (later)
+* **Update**: [TASK-001-05 Embedded statements](/tasks/001-template-language/05-embedded-statements.md)
+  is done: the line rule in the markup parser, with header extents decided by go/parser.
+* **Update**: [PLAN-001](/plans/001-template-language.md): corrected the header-extent rule
+  (the first `{` at depth 0 is not Go's rule) and added "As built: embedded statements"
+  (frames for bodies, extra keep spans and semis, `region.stmts` for the graft).
+* **Update**: [SPEC-001](/specs/001-template-language.md) R18 (content before the first clause
+  and a line starting with `else` are errors; content may follow a statement's last `}`) and
+  R20 (in `<pre>`, the lines of embedded statements add no whitespace).
+* **Update**: TASK-001-06 and TASK-005-02 are ready; they touch different files.
+
 ## 2026-11-04
 * **Update**: Merged the second parallel run:
   [TASK-001-04 Markup parser](/tasks/001-template-language/04-markup-parser.md),

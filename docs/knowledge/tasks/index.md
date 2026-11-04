@@ -1,16 +1,18 @@
 # Tasks
 Plan slices as todo lists. Pick a `todo` slice whose `depends_on` are all `done`.
 
-* [SPEC-001 Template language](001-template-language/) - 7 slices; 01–04 done, 05 ready
+* [SPEC-001 Template language](001-template-language/) - 7 slices; 01–05 done, 06 ready
 * [SPEC-002 Code generation](002-code-generation/) - 4 slices; 01 done and superseded
 * [SPEC-003 Golpe CLI](003-cli/) - 1 slice
 * [SPEC-004 Language server](004-language-server/) - 1 slice (after the generator)
-* [SPEC-005 Component tags](005-component-tags/) - 4 slices; 01 done, 02 ready after 001-05
+* [SPEC-005 Component tags](005-component-tags/) - 4 slices; 01 done, 02 ready
 * [SPEC-006 Optional helpers](006-optional-helpers/) - 1 slice; done
 
 # Ready now
-TASK-001-05 (embedded statements), then TASK-005-02 (component tags): both edit
-`internal/parser/markup.go`, so they run one after the other, not in parallel.
+TASK-001-06 (file parser) and TASK-005-02 (component tags). They touch
+different files (001-06: `parser.go`, `scan.go`, `mask.go`, `graft.go`,
+`testdata`; 005-02: `internal/ast`, `markup.go`, `markup_component_test.go`),
+so they may run in parallel.
 
 # Dependencies
 
@@ -20,8 +22,8 @@ TASK-001-05 (embedded statements), then TASK-005-02 (component tags): both edit
 | 001-02 Token extension | 001-01 | done |
 | 001-03 AST nodes | 001-01 | done |
 | 001-04 Markup parser | 001-02, 001-03 | done |
-| 001-05 Embedded statements | 001-04 | ready |
-| 001-06 File parser | 001-05 | |
+| 001-05 Embedded statements | 001-04 | done |
+| 001-06 File parser | 001-05 | ready |
 | 001-07 Conformance | 001-06 | |
 | 002-01 Runtime writers | 001-01 | done (superseded) |
 | 002-02 Lowering | 001-06 | |
@@ -30,7 +32,7 @@ TASK-001-05 (embedded statements), then TASK-005-02 (component tags): both edit
 | 003-01 generate command | 002-02 | |
 | 004-01 LSP proxy skeleton | 002-03, 003-01 | |
 | 005-01 Element name lists | 001-02 | done |
-| 005-02 Parse component tags | 001-04, 005-01 | after 001-05 (shared file) |
+| 005-02 Parse component tags | 001-04, 005-01 | ready |
 | 005-03 Declaration resolver | 001-06 | |
 | 005-04 Lower component tags | 002-03, 005-02, 005-03 | |
 | 006-01 Class and If | 001-01 | done |

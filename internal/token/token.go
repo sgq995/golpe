@@ -13,7 +13,12 @@
 // the parser asks [IsTemplateKeyword] where a declaration starts.
 //
 // [IsVoid], [IsRawText] and [IsEmbeddedKeyword] classify tag names and
-// words for the markup parser and the code generator.
+// words for the markup parser and the code generator. [IsElement] and
+// [IsCustomElement] tell markup from component tags (SPEC-005 R1): a tag is
+// markup when its name is an HTML, SVG or MathML element name or contains
+// '-'; any other name is a component tag, which the parser checks is a Go
+// identifier or a qualified identifier pkg.Name. Tag names are matched
+// ignoring ASCII case only, as HTML matches them.
 //
 // Positions are not part of this package: Golpe uses go/token.Pos in a
 // shared go/token.FileSet throughout.

@@ -96,3 +96,35 @@ func ExampleIsEmbeddedKeyword() {
 	// If false
 	// else false
 }
+
+// A tag is markup when its name is an HTML, SVG or MathML element, ignoring
+// ASCII case, or a custom element; any other name is a component tag
+// (SPEC-005 R1). So "Button" is the HTML button element, not a component.
+func ExampleIsElement() {
+	for _, tag := range []string{"div", "DIV", "linearGradient", "mrow", "Button", "Card", "ui.Button", "my-widget"} {
+		fmt.Println(tag, token.IsElement(tag))
+	}
+	// Output:
+	// div true
+	// DIV true
+	// linearGradient true
+	// mrow true
+	// Button true
+	// Card false
+	// ui.Button false
+	// my-widget false
+}
+
+// Any name with a '-' is a custom element, and so markup, even where the
+// HTML standard would reject it as a custom element name.
+func ExampleIsCustomElement() {
+	for _, tag := range []string{"my-widget", "My-Widget", "annotation-xml", "myWidget", "my_widget"} {
+		fmt.Println(tag, token.IsCustomElement(tag))
+	}
+	// Output:
+	// my-widget true
+	// My-Widget true
+	// annotation-xml true
+	// myWidget false
+	// my_widget false
+}

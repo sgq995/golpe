@@ -24,10 +24,13 @@ import (
 //     which stay Go. It then writes ';' at start, the placeholder go/parser
 //     turns into an explicit EmptyStmt (LAB-001), and at every offset in
 //     semis. The '{' of an interpolation is not kept, so {x} reads " x;"
-//     (LAB-005). The mask keeps the length and every newline of the source.
+//     (LAB-005), and an embedded statement keeps its Go parts, so
+//     "if ok {<b>{x}</b>}" reads "if ok {    x;    }". The mask keeps the
+//     length and every newline of the source.
 //   - Pass 5, the graft, wraps root in an ast.MarkupStmt holding that
-//     EmptyStmt, and gives each interpolation of interps the expression of
-//     the expression statement go/parser built inside its braces.
+//     EmptyStmt, gives each interpolation of interps the expression of the
+//     expression statement go/parser built inside its braces, and each node
+//     of stmts the statement go/parser built at its keyword.
 type region struct {
 	// start and end delimit the markup: src[start] is the '<' of the root;
 	// end is after the root's last byte, or where parsing stopped after an
@@ -42,17 +45,33 @@ type region struct {
 	root ast.Node
 
 	// keep holds the byte ranges that stay Go in the mask, in source order
-	// and disjoint: interpolation expressions (the bytes between the braces)
-	// and Go comments, which go/parser then records in File.Comments.
-	// TASK-001-05 adds the headers of embedded statements.
+	// and disjoint: interpolation expressions (the bytes between the
+	// braces); Go comments, which go/parser then records in File.Comments;
+	// and the Go parts of the embedded statements whose header is valid (see
+	// markup_stmt.go): each header from its keyword through the '{' of its
+	// body ("for _, x := range xs {"), each else ("else {", or "else" before
+	// the header "if y {"), each case or default clause through its ':', and
+	// each '}' that closes a body.
 	keep []span
 
-	// semis holds the offsets, in source order, of the closing '}' of the
-	// interpolations: the mask writes ';' there.
+	// semis holds the offsets, in source order, where the mask writes ';':
+	// the closing '}' of each interpolation, and the byte after the last
+	// '}' of an embedded statement when the line goes on after it (Go needs
+	// a ';' between "if ok { }" and a following "x;" on the same line).
+	// None is inside a keep span.
 	semis []int
 
 	// interps holds the interpolations of the tree, in source order.
 	interps []*ast.Interp
+
+	// stmts holds, in source order of their keywords, the embedded
+	// statements and clauses whose Go parts the mask keeps: *ast.If, *ast.For,
+	// *ast.Switch, *ast.Select and *ast.Case. The graft gives each the go/ast
+	// statement that go/parser built at its keyword (Pos): an IfStmt; a
+	// ForStmt or RangeStmt; a SwitchStmt or TypeSwitchStmt; a SelectStmt; a
+	// CaseClause or CommClause. A statement whose header is invalid is in the
+	// tree but not here: its Stmt stays nil, and an error was reported.
+	stmts []ast.Node
 }
 
 // A span is the byte range [from, to) of a source.
@@ -84,9 +103,9 @@ func lineFile(filename string, base int, src []byte) *token.File {
 // (see lineFile). Errors are added to errs, and the region holds as much of
 // the tree as could be built.
 //
-// Every tag is parsed as an element: component tags are TASK-005-02's.
-// Embedded statements are TASK-001-05's: a line of content whose first word
-// is if, for, switch or select is reported as not supported yet.
+// A line of content whose first word is if, for, switch or select starts an
+// embedded statement (R18, see markup_stmt.go). Every tag is parsed as an
+// element: component tags are TASK-005-02's.
 func parseMarkup(file *token.File, src []byte, start int, errs *errorList) *region {
 	p := &markupParser{file: file, src: src, off: start, errs: errs, unwind: noUnwind}
 	p.r = &region{start: start}
@@ -104,13 +123,15 @@ type markupParser struct {
 	errs *errorList
 	r    *region // being built
 
-	// stack holds the open elements and fragments, outermost first.
+	// stack holds the open elements, fragments and bodies of embedded
+	// statements, outermost first.
 	stack []*frame
 
-	// unwind is set after a close tag that closes an enclosing frame, the
-	// tag being pending: the content loops of the frames deeper than unwind
-	// return at once, and the frame at that depth takes pending as its close
-	// tag. -1 ends the region early. noUnwind is the normal state.
+	// unwind is set after a close tag or '}' that closes an enclosing frame:
+	// the content loops of the frames deeper than unwind return at once, and
+	// the frame at that depth takes pending as its close tag, or, for a body,
+	// the '}' at p.off as its closing brace. -1 ends the region early.
+	// noUnwind is the normal state.
 	unwind  int
 	pending *endTag
 
@@ -121,9 +142,10 @@ type markupParser struct {
 
 const noUnwind = math.MaxInt
 
-// A frame is an element or fragment whose content is being parsed.
+// A frame is an element, a fragment or a body of an embedded statement
+// whose content is being parsed.
 type frame struct {
-	name string // the element's name as written; "" for a fragment
+	name string // the element's name as written; "" for a fragment or a body
 
 	// textOnly is the name, as written, of the <textarea> or <title> this
 	// content is in, which holds only text and interpolations (SPEC-001
@@ -131,10 +153,32 @@ type frame struct {
 	textOnly string
 
 	pre bool // inside <pre> or <textarea>: whitespace is kept (R20)
+
+	// body is set for the body of an embedded statement, which a '}' closes
+	// anywhere on a line (SPEC-001 R18). clauses is set too for the body of
+	// a switch (or, with sel, a select): there, before the first clause and
+	// in each clause, a line starting with case or default ends the
+	// content. bad is set when the statement's header is invalid: its
+	// clauses are not kept for the mask.
+	body, clauses, sel, bad bool
+
+	// How the content ended, set by content: for an element or fragment,
+	// the positions of its close tag's '<' and end (NoPos when missing); for
+	// a body, the offset of its closing '}' (-1 when missing); for the body
+	// of a switch or select, the clause whose header ended the content (nil
+	// when it ended otherwise).
+	closePos, endPos token.Pos
+	rbrace           int
+	next             *ast.Case
 }
 
-// closeTag returns the close tag of f as it is expected: </name> or </>.
-func (f *frame) closeTag() string { return "</" + f.name + ">" }
+// closeTag returns the end of f as it is expected: </name>, </> or '}'.
+func (f *frame) closeTag() string {
+	if f.body {
+		return "'}'"
+	}
+	return "</" + f.name + ">"
+}
 
 // root parses the root of the markup statement.
 func (p *markupParser) root() ast.Node {
@@ -199,7 +243,8 @@ func (p *markupParser) element(parent *frame) *ast.Element {
 		if isTextOnly(el.Name) {
 			f.textOnly = el.Name
 		}
-		el.Children, el.Close, el.EndPos = p.content(f)
+		el.Children = p.content(f)
+		el.Close, el.EndPos = f.closePos, f.endPos
 	}
 	return el
 }
@@ -210,7 +255,8 @@ func (p *markupParser) fragment(parent *frame) *ast.Fragment {
 	fr := &ast.Fragment{Lt: p.pos(p.off)}
 	p.off += len("<>")
 	f := &frame{textOnly: parent.textOnly, pre: parent.pre}
-	fr.Children, fr.Close, fr.EndPos = p.content(f)
+	fr.Children = p.content(f)
+	fr.Close, fr.EndPos = f.closePos, f.endPos
 	return fr
 }
 
@@ -376,26 +422,42 @@ func (p *markupParser) skipBraces() {
 	p.off = len(p.src)
 }
 
-// content parses the content of the open element or fragment f up to and
-// including its close tag (SPEC-001 R13, R16–R18, R20–R22). It returns the
-// content, with its whitespace normalised, and the positions of the close
-// tag's '<' and of its end, each NoPos when missing.
-func (p *markupParser) content(f *frame) (list []ast.Node, closePos, endPos token.Pos) {
+// content parses the content of the open frame f (SPEC-001 R13, R16–R22):
+// an element's or fragment's up to and including its close tag, a body's up
+// to and including its closing '}', or, in the body of a switch or select,
+// the content before the first clause or of one clause, up to the next
+// clause's header (included) or the closing '}'. It returns the content,
+// with its whitespace normalised, and records in f how it ended.
+func (p *markupParser) content(f *frame) []ast.Node {
 	p.stack = append(p.stack, f)
 	depth := len(p.stack) - 1
 	defer func() { p.stack = p.stack[:depth] }()
+	f.closePos, f.endPos, f.rbrace, f.next = token.NoPos, token.NoPos, -1, nil
 
 	var (
-		text      = -1    // offset of the pending text, or -1
-		boundary  = true  // at a node boundary: only whitespace since the start tag, a node or a Go comment (R21)
-		space     = false // the previous byte is whitespace
-		lineStart = false // only whitespace and Go comments since the last newline
+		list     []ast.Node
+		text     = -1    // offset of the pending text, or -1
+		boundary = true  // at a node boundary: only whitespace since the start tag, a node or a Go comment (R21)
+		space    = false // the previous byte is whitespace
+
+		// only whitespace and Go comments since the last newline; a body in
+		// preformatted content starts on a new line (see skipLineEnd)
+		lineStart = p.off > 0 && p.src[p.off-1] == '\n'
 	)
 	flushAt := func(end int) { // the pending text ends at end
-		if text >= 0 {
+		if text >= 0 && end > text {
 			list = append(list, &ast.Text{ValuePos: p.pos(text), Raw: string(p.src[text:end])})
-			text = -1
 		}
+		text = -1
+	}
+	// flushLine ends the pending text before a line of an embedded
+	// statement (keyword, clause or '}') at off: in preformatted content, the
+	// whitespace that starts the line is the statement's, not content.
+	flushLine := func(off int, atLineStart bool) {
+		if f.pre && atLineStart {
+			off = bytes.LastIndexByte(p.src[:off], '\n') + 1
+		}
+		flushAt(off)
 	}
 	addText := func() { // the byte at p.off is text
 		if text < 0 {
@@ -403,15 +465,29 @@ func (p *markupParser) content(f *frame) (list []ast.Node, closePos, endPos toke
 		}
 		p.off++
 	}
+	// afterStmt follows an embedded statement just parsed: in preformatted
+	// content, the end of its last line is the statement's, not content.
+	afterStmt := func() {
+		boundary, space = true, false
+		if f.pre && p.unwind == noUnwind {
+			lineStart = p.skipLineEnd()
+		}
+	}
 loop:
 	for {
 		if p.unwind <= depth {
 			flushAt(p.off)
-			if p.unwind == depth { // an inner frame met f's close tag
-				t := p.pending
-				p.unwind, p.pending = noUnwind, nil
-				p.off = t.end
-				closePos, endPos = t.closePos, t.endPos
+			if p.unwind == depth {
+				p.unwind = noUnwind
+				if f.body { // an inner frame met the '}' that closes f
+					f.rbrace = p.off
+					p.off++
+				} else { // an inner frame met f's close tag
+					t := p.pending
+					p.pending = nil
+					p.off = t.end
+					f.closePos, f.endPos = t.closePos, t.endPos
+				}
 			}
 			break loop
 		}
@@ -430,36 +506,68 @@ loop:
 		// The line rule (R18) looks at the first word of every line.
 		atLineStart := lineStart
 		lineStart = false
-		if atLineStart {
-			if c == '}' {
-				// A "}" line closes an embedded body (TASK-001-05). With none
-				// open it most likely ends the Go block that holds this
-				// markup: f was not closed, and the region ends here.
-				p.errorf(p.off, "expected %s, found '}'", f.closeTag())
-				p.unwind = -1
-				break loop
-			}
-			if f.textOnly == "" && golpetoken.IsEmbeddedKeyword(p.word()) {
-				kw := p.off
-				if n := p.embedded(); n != nil {
-					flushAt(kw)
+		if atLineStart && f.textOnly == "" {
+			kw := p.off
+			switch w := p.word(); {
+			case golpetoken.IsEmbeddedKeyword(w):
+				if n := p.embedded(f, w); n != nil {
+					flushLine(kw, true)
 					list = append(list, n)
-					boundary, space = true, false
+					afterStmt()
+					continue
+				}
+			case f.clauses && (w == "case" || w == "default"):
+				if f.next = p.clause(f, w); f.next != nil {
+					flushLine(kw, true)
+					break loop
+				}
+			case w == "else":
+				p.errorf(kw, `else must follow '}' on the same line; write {"else"} to start text with it`)
+				// Recovery: the else continues the if before it, if only
+				// whitespace separates them; otherwise it is dropped. None
+				// of its Go parts is kept.
+				s := (*ast.If)(nil)
+				if text < 0 || len(bytes.TrimSpace(p.src[text:kw])) == 0 {
+					s = danglingIf(list)
+				}
+				orphan := s == nil
+				if orphan {
+					s = &ast.If{}
+				}
+				if p.elseBranch(f, s, kw, -1); s.Else != nil {
+					if orphan {
+						flushLine(kw, true)
+					} else {
+						text = -1
+					}
+					afterStmt()
 					continue
 				}
 			}
 		}
 
 		switch {
+		case c == '}' && f.body:
+			flushLine(p.off, atLineStart)
+			f.rbrace = p.off
+			p.off++
+			break loop
+		case c == '}' && atLineStart:
+			// A "}" line with no body open most likely ends the Go block
+			// that holds this markup: f was not closed, and the region ends
+			// here. With a body open, the '}' closes it.
+			p.errorf(p.off, "expected %s, found '}'", f.closeTag())
+			p.unwind = p.enclosingBody()
+			break loop
 		case c == '<':
 			switch next := p.peek(1); {
 			case next == '/' && (isLetter(p.peek(2)) || p.peek(2) == '>'):
 				flushAt(p.off)
 				t := p.scanEndTag()
 				switch {
-				case equalFoldASCII(t.name, f.name):
+				case !f.body && equalFoldASCII(t.name, f.name):
 					p.off = t.end
-					closePos, endPos = t.closePos, t.endPos
+					f.closePos, f.endPos = t.closePos, t.endPos
 					break loop
 				case t.name != "" && golpetoken.IsVoid(t.name):
 					p.errorf(t.lt, "void element <%s> cannot have content or a close tag", t.name)
@@ -507,29 +615,29 @@ loop:
 		space = false
 	}
 	flushAt(p.off)
-	return normalize(list, f.pre), closePos, endPos
+	return normalize(list, f.pre)
 }
 
-// enclosing returns the depth of the innermost frame enclosing the current
-// one that the close tag </name> closes, or -1.
+// enclosing returns the depth of the innermost element or fragment
+// enclosing the current frame that the close tag </name> closes, or -1.
 func (p *markupParser) enclosing(name string) int {
 	for i := len(p.stack) - 2; i >= 0; i-- {
-		if equalFoldASCII(p.stack[i].name, name) {
+		if f := p.stack[i]; !f.body && equalFoldASCII(f.name, name) {
 			return i
 		}
 	}
 	return -1
 }
 
-// embedded parses the embedded statement whose keyword, if, for, switch or
-// select, is the first word of the line at p.off (the line rule, SPEC-001
-// R18), and returns it.
-//
-// It is TASK-001-05's. Until then it reports an error and returns nil, and
-// the line is parsed as text.
-func (p *markupParser) embedded() ast.Node {
-	p.errorf(p.off, "embedded statements are not supported yet")
-	return nil
+// enclosingBody returns the depth of the innermost body of an embedded
+// statement enclosing the current frame, or -1.
+func (p *markupParser) enclosingBody() int {
+	for i := len(p.stack) - 2; i >= 0; i-- {
+		if p.stack[i].body {
+			return i
+		}
+	}
+	return -1
 }
 
 // An endTag is a close tag, </name> or </>, as scanEndTag found it.
@@ -744,18 +852,21 @@ func (p *markupParser) name() string {
 	return string(p.src[start:p.off])
 }
 
-// word returns the word at p.off: letters, digits and '_', as in a Go
+// word returns the word at p.off (see wordAt).
+func (p *markupParser) word() string { return p.wordAt(p.off) }
+
+// wordAt returns the word at src[i:]: letters, digits and '_', as in a Go
 // identifier, so that "format" and "iffy" are not "for" and "if".
-func (p *markupParser) word() string {
-	i := p.off
-	for i < len(p.src) {
-		r, n := utf8.DecodeRune(p.src[i:])
+func (p *markupParser) wordAt(i int) string {
+	j := i
+	for j < len(p.src) {
+		r, n := utf8.DecodeRune(p.src[j:])
 		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
 			break
 		}
-		i += n
+		j += n
 	}
-	return string(p.src[p.off:i])
+	return string(p.src[i:j])
 }
 
 func (p *markupParser) skipSpace() {

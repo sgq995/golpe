@@ -492,29 +492,6 @@ func TestMarkupErrors(t *testing.T) {
 	})
 }
 
-// TestMarkupLineRule pins the hook TASK-001-05 replaces: the first word of
-// every line of content is checked for an embedded statement keyword, whole
-// words only, except in text-only and raw text elements.
-func TestMarkupLineRule(t *testing.T) {
-	runMarkupCases(t, []markupCase{
-		{name: "keyword", src: "<p>\n\tif you can\n</p>", dump: `Element 1:1-3:5 p close=3:1
-  Text 1:4-3:1 "if you can"
-`, errs: `2:2: embedded statements are not supported yet`},
-		{name: "every keyword", src: "<p>\nif(x)\n  for\n\tswitch x\nselect\n</p>", dump: "-", errs: `2:1: embedded statements are not supported yet
-3:3: embedded statements are not supported yet
-4:2: embedded statements are not supported yet
-5:1: embedded statements are not supported yet`},
-		{name: "whole words only", src: "<p>\nformat\niffy\nif_x\nIf\nifé\nfor2\n</p>", dump: "-"},
-		{name: "not at the start of a line", src: `<p>if x</p>`, dump: "-"},
-		{name: "after a Go comment at the start of a line", src: "<p>\n/* c */ for\n</p>", dump: "-", errs: `2:9: embedded statements are not supported yet`},
-		{name: "in pre", src: "<pre>\nfor x\n</pre>", dump: "-", errs: `2:1: embedded statements are not supported yet`},
-		{name: "a } line ends unclosed markup", src: "<p>hello\n}", dump: `Element 1:1-2:1 p
-  Text 1:4-2:1 "hello"
-`, errs: `2:1: expected </p>, found '}'`},
-		{name: "a } line in a text-only element", src: "<title>x\n  }", dump: "-", errs: `2:3: expected </title>, found '}'`},
-	})
-}
-
 // markupMask is a test-only version of pass 3 (TASK-001-06), following the
 // region documentation: it blanks every region except its kept spans and
 // newlines, writes ';' at its start and its semis, and turns the first

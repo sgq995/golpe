@@ -2,9 +2,14 @@
 //
 // Nothing here is required: code generated from .golpe files imports only
 // the standard library and never this package (see
-// docs/knowledge/decisions/005-standard-library-only-output.md). Import it
-// only for the conveniences it offers, see
-// docs/knowledge/specs/006-optional-helpers.md.
+// docs/knowledge/decisions/005-standard-library-only-output.md), so removing
+// it from a project only affects code the developer wrote. Import it only
+// for the conveniences it offers (see
+// docs/knowledge/specs/006-optional-helpers.md):
+//
+//   - [Element] names the type every template returns;
+//   - [Class] builds a class attribute value from optional parts;
+//   - [If] keeps a string only when a condition holds.
 package golpe
 
 import "io"
